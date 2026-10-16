@@ -1,4 +1,4 @@
-# Compact Quadratic Curves 1.0
+# Compact Quadratic Curves
 
 [English](README.en.md) · [简体中文](README.sc.md) · [繁體中文](README.tc.md)
 
