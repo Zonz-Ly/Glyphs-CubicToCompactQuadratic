@@ -1,0 +1,129 @@
+{
+  "version": "1.0",
+  "tests": 232,
+  "native_Glyphs": false,
+  "defaults": {
+    "deviation": 1,
+    "max_controls": 3,
+    "center_limit": 7,
+    "angle_limit": 5,
+    "keep_line_tangent": true,
+    "merge_curves": true,
+    "integer_coords": true,
+    "add_midpoint": false,
+    "keep_curve_tangent": true
+  },
+  "units": "Distance settings scale once by font UPM / 1000; original node coordinates remain in font units",
+  "tolerance_factors": {
+    "ordinary": 0.5,
+    "merge": 1,
+    "centering": 0.5,
+    "comparison_margin": 0.5
+  },
+  "candidate_selection": "For every multi-control result, keep the first lower count whose worst-layer continuous-error upper bound is strictly below current error plus half the configured outline tolerance; merged results must pass the full tolerance",
+  "settings": {
+    "persistence": "Immediate per-setting validation and saving; invalid intermediate values preserve last valid preferences; restore invalid text when editing ends",
+    "window": "Native close button; hidden transparent titlebar; full-size content; opaque system window background; compact balanced vertical padding; draggable background",
+    "numeric_fields_points": [
+      22,
+      22
+    ],
+    "numeric_steps": {
+      "deviation": 0.1,
+      "others": 1,
+      "shift_multiplier": 10
+    },
+    "languages": 11,
+    "height_points": 318,
+    "numeric_alignment": "right",
+    "horizontal_margin_points": 22,
+    "close_button_offset_points": {
+      "right": 2,
+      "down": 2
+    },
+    "vertical_alignment": "Original fixed-height labels at the original numeric-row text position; all text rows use the same offset and uniform pitch",
+    "keyboard_focus": "Explicit cyclic key-view chain across all nine settings, including focusable checkboxes",
+    "control_offset": "Restore controls upward by 3.5 points relative to focus-version base frames, then apply a fixed 1 point downward offset on every display; labels remain fixed",
+    "content_top_adjustment_points": 0.5,
+    "additional_bottom_padding_points": 2
+  },
+  "checks": [
+    "Compatible-master, special-layer and component traversal; guarded batch writes and rollback",
+    "Whole-run and partial smooth-curve merging; native hint boundaries and oriented angle gates",
+    "Half-tolerance centering for ordinary and merged curves at UPM 1000, 2000 and 2048",
+    "Integer-grid centering and explicit/implicit quadratic joins",
+    "Exact floating-point tangent rays; ray-intersected integer grid cells, parallel-ray overlap and impossible-constraint cancellation",
+    "Tolerance-margin candidate selection with fixed reference, strict threshold and shared control counts",
+    "Per-control immediate saving, invalid/IME input, field editor text and exact decimal/large-integer arrow increments",
+    "Hidden titlebar, single native close control, opaque background and compact balanced content padding",
+    "Delayed progress, background work, cancellation, standalone and plugin entry points",
+    "Selected backup/background isolation, active background routing, mixed layer selection, membership changes and no component-base edits",
+    "Given cubic and reported overshooting quadratic; rotation/reflection/direction cases",
+    "Numeric text right alignment",
+    "Average unit-tangent preservation at retained cubic joins: merge disabled, whole/partial merge failure, successful merge, selection boundaries, sharp/degenerate joins, closed-path wrap and compatible masters with integer explicit midpoints"
+  ],
+  "layer_scope": "Master and special layers remain synchronized; selected backup and background layers are independent and preserve component bases",
+  "svg_regression": {
+    "source_path": "M4,0l1,462c0,47-2,76-5,102",
+    "fixed": true,
+    "resolution": "Integer tangent controls use ray-intersected grid cells rather than exact collinear lattice centers; integer local search and centering share the same constraint.",
+    "release_default_result": {
+      "parts": [
+        [
+          [
+            5,
+            462
+          ],
+          [
+            5,
+            513
+          ],
+          [
+            0,
+            564
+          ]
+        ]
+      ],
+      "error_bounds": [
+        0.30318628983655865,
+        0.3096439156949005
+      ]
+    }
+  },
+  "curve_join_preservation": {
+    "default": true,
+    "mode": "Exact mean unit-tangent rays in floating-point mode; ray-intersected grid cells in integer mode",
+    "gate": "Original directed cubic handle angle within configured angle_limit",
+    "retained_boundaries": "Merge candidates use the original mean tangent at their surviving first and last endpoints; removed internal joins impose no constraint",
+    "selected_neighbors": "Unconverted adjacent cubics remain unchanged"
+  },
+  "documentation": {
+    "languages": [
+      "en",
+      "zh-Hans",
+      "zh-Hant"
+    ],
+    "files": [
+      "README.en.md",
+      "README.sc.md",
+      "README.tc.md"
+    ],
+    "distance_units": "Units at 1000 UPM; 单位于一千全宽细分度"
+  },
+  "cleanup": {
+    "removed_legacy_preference_reads": [
+      "single_error",
+      "only_one"
+    ],
+    "unused_localization_keys": [],
+    "retired_features_absent": [
+      "result_dialog",
+      "empty_input_dialog",
+      "restore_defaults",
+      "postwrite_coordinate_verification",
+      "PAIR_TARGET_ERROR",
+      "C-auto"
+    ],
+    "retained": "Numeric preference precision handling remains required; fitting error metrics are active algorithm data"
+  }
+}
