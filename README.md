@@ -1,6 +1,6 @@
 # Compact Quadratic Curves
 
-[English](README.en.md) · [简体中文](README.sc.md) · [繁體中文](README.tc.md)
+[繁體中文](README.tc.md) · [简体中文](README.sc.md)
 
 By Zonz. Converts cubic Bézier curves to quadratic outlines with fewer control points in Glyphs 3 with Python 3. Supports Intel and Apple Silicon, with no additional Python dependency.
 
