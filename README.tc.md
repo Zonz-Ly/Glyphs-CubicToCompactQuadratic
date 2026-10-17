@@ -1,6 +1,6 @@
 # Cubic To Compact Quadratic
 
-作者：Zonz。將三次貝塞爾曲線轉換為控制點較少的二次曲線。適用於 Glyphs 3 的 Python 3 環境，支援 Intel 與 Apple Silicon，無額外 Python 相依套件。
+將三次貝塞爾曲線轉換為控制點較少的二次曲線。適用於 Glyphs 3 的 Python 3 環境，支援 Intel 與 Apple Silicon，無額外 Python 相依套件。
 
 ## 安裝與使用
 
