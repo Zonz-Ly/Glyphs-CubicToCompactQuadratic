@@ -90,8 +90,8 @@ def modules(font):
                                   'Foundation':foundation,'AppKit':appkit})
 
 def plugin_files():
-    root=ROOT if (ROOT/'CubicToQuadratic.glyphsPlugin').exists() else ROOT.parent
-    resources=root/'CubicToQuadratic.glyphsPlugin/Contents/Resources'
+    root=ROOT if (ROOT/'CubicToCompactQuadratic.glyphsPlugin').exists() else ROOT.parent
+    resources=root/'CubicToCompactQuadratic.glyphsPlugin/Contents/Resources'
     return root,resources
 def load(path,name):
     spec=importlib.util.spec_from_file_location(name,str(path));m=importlib.util.module_from_spec(spec)
@@ -104,7 +104,7 @@ class EntryTests(unittest.TestCase):
         a,b=glyph('A'),glyph('B');f=Font([a,b],edit=False);f.selection=[a,b]
         root,res=plugin_files()
         with patch.dict(sys.modules,modules(f)),contextlib.redirect_stdout(io.StringIO()):
-            exec(compile((root/'ConvertToCompactQuadratic.py').read_text(encoding='utf-8'),'ConvertToCompactQuadratic.py','exec'),{'__name__':'__main__'})
+            exec(compile((root/'CubicToCompactQuadratic.py').read_text(encoding='utf-8'),'CubicToCompactQuadratic.py','exec'),{'__name__':'__main__'})
         self.assertEqual([a.layers[0].paths[0].nodes[-1].type,b.layers[0].paths[0].nodes[-1].type],['qcurve','qcurve'])
         self.assertEqual(f.undo.groups,1);self.assertEqual(f.events,['stop','start','redraw'])
 

@@ -1,4 +1,4 @@
-# Compact Quadratic Curves
+# Cubic To Compact Quadratic
 
 [繁體中文](README.tc.md) · [简体中文](README.sc.md)
 
@@ -6,9 +6,9 @@ By Zonz. Converts cubic Bézier curves to quadratic outlines with fewer control 
 
 ## Installation and use
 
-Extract the archive, double-click CubicToQuadratic.glyphsPlugin, replace the previous version and restart Glyphs.
+Extract the archive, double-click CubicToCompactQuadratic.glyphsPlugin, replace the previous version and restart Glyphs.
 
-Choose Convert to Compact Quadratic Curves in the Path menu, or press Shift+Command+2. Hold Option to reveal settings, or press Shift+Option+Command+2.
+Choose Cubic To Compact Quadratic in the Path menu, or press Shift+Command+2. Hold Option to reveal settings, or press Shift+Option+Command+2.
 
 In Edit view, select both cubic controls or both endpoints to convert particular curves. Without selected nodes, the current glyph is processed. In Font view, selected glyphs are processed.
 
@@ -40,4 +40,4 @@ Original endpoint coordinates remain fixed. Incompatible glyphs or conversions w
 
 Conversion supports cancellation and one-step undo. The interface follows Glyphs’ language, supporting English, Simplified and Traditional Chinese, Japanese, Korean, German, French, Spanish, Italian, Portuguese and Russian.
 
-ConvertToCompactQuadratic.py is a synchronous alternative whose top-level constants are independent of plugin settings. Sources are in development. See THIRD-PARTY.md and GlyphsSDK-LICENSE.txt for licensing.
+CubicToCompactQuadratic.py is a synchronous alternative whose top-level constants are independent of plugin settings. Sources are in development. See THIRD-PARTY.md and GlyphsSDK-LICENSE.txt for licensing.

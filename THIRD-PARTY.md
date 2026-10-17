@@ -1,6 +1,6 @@
 # Third-party component
 
-The unmodified native Python plug-in loader at CubicToQuadratic.glyphsPlugin/Contents/MacOS/plugin is from the official GlyphsSDK repository, Glyphs3 branch.
+The unmodified native Python plug-in loader at CubicToCompactQuadratic.glyphsPlugin/Contents/MacOS/plugin is from the official GlyphsSDK repository, Glyphs3 branch.
 
 Repository: https://github.com/schriftgestalt/GlyphsSDK
 Commit: 569244a7181e08fc7c5230bcdfad6b9f7e5ea11f

@@ -15,7 +15,7 @@ TRANSLATIONS = {
     "ru": "Сохранять плавные соединения кривых"
 },
   "title": {
-    "en": "Convert to Compact Quadratic Curves",
+    "en": "Cubic To Compact Quadratic",
     "zh-Hans": "转换为精简的二次曲线",
     "zh-Hant": "轉換為精簡的二次曲線",
     "ja": "簡潔な二次曲線に変換",
@@ -28,7 +28,7 @@ TRANSLATIONS = {
     "ru": "Преобразовать в компактные квадратичные кривые"
   },
   "settings": {
-    "en": "Convert to Compact Quadratic Curves Settings⋯",
+    "en": "Cubic To Compact Quadratic Settings⋯",
     "zh-Hans": "转换为精简的二次曲线设置⋯",
     "zh-Hant": "轉換為精簡的二次曲線設定⋯",
     "ja": "簡潔な二次曲線に変換の設定⋯",

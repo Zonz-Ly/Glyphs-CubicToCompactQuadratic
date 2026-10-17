@@ -1,10 +1,10 @@
-# 精简二次曲线转换
+# Cubic To Compact Quadratic
 
 作者：Zonz。将三次贝塞尔曲线转换为控制点较少的二次曲线。适用于 Glyphs 3 的 Python 3 环境，支持 Intel 与 Apple Silicon，无额外 Python 依赖。
 
 ## 安装与使用
 
-解压后双击 CubicToQuadratic.glyphsPlugin 安装，替换旧版并重启 Glyphs。
+解压后双击 CubicToCompactQuadratic.glyphsPlugin 安装，替换旧版并重启 Glyphs。
 
 在「路径」菜单选择「转换为精简的二次曲线」，快捷键为 ⇧⌘2。按住 Option 显示设置入口，快捷键为 ⇧⌥⌘2。
 
@@ -38,4 +38,4 @@
 
 转换支持取消，完成后可一次撤销。界面支持简繁中文、英语、日语、韩语、德语、法语、西班牙语、意大利语、葡萄牙语及俄语，跟随 Glyphs 的语言。
 
-ConvertToCompactQuadratic.py 为同步备用脚本，顶部常量独立于插件设置。源代码见 development；许可见 THIRD-PARTY.md 与 GlyphsSDK-LICENSE.txt。
+CubicToCompactQuadratic.py 为同步备用脚本，顶部常量独立于插件设置。源代码见 development；许可见 THIRD-PARTY.md 与 GlyphsSDK-LICENSE.txt。
