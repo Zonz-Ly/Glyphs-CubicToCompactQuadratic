@@ -10,6 +10,7 @@ from fast_fit import fit_corresponding,select_simpler
 from preferences import validated_settings
 from options_fit import adjust_parts,center_parts
 from tangent_constraints import smooth_join,TangentConflict
+from segment_index import BoxIndex
 
 class CompositeContext:
     def __init__(self,curves,count=65,reverse_count=25,geometry=None):
@@ -17,6 +18,7 @@ class CompositeContext:
         self.reverse_count=reverse_count
         self.boxes=[(min(z.real for z in p),max(z.real for z in p),min(z.imag for z in p),max(z.imag for z in p)) for p in curves]
         self.box_allowance=max([1.0]+[abs(z) for p in curves for z in p])*1e-12
+        self.box_index=BoxIndex(self.boxes) if len(curves)>=16 else None
         if geometry is None:
             contexts=[Context(p,2,reverse_count) for p in curves];line=[];edges=[]
             for i,context in enumerate(contexts):
@@ -42,7 +44,8 @@ class CompositeContext:
             candidates=[(abs(point-z),i,point,t) for i,c in enumerate(self.contexts) for point,t in [c.nearest(z)]]
             best=min(candidates,key=lambda r:r[:2]);return best[2],(best[1],best[3])
         lower=lambda b:math.hypot(max(b[0]-z.real,0,z.real-b[1]),max(b[2]-z.imag,0,z.imag-b[3]))
-        ranked=sorted((lower(box),i) for i,box in enumerate(self.boxes));best=None
+        ranked=self.box_index.ordered(z) if self.box_index is not None else sorted((lower(box),i) for i,box in enumerate(self.boxes))
+        best=None
         for bound,i in ranked:
             if best is not None and bound-self.box_allowance>best[0]:break
             point,t=self.contexts[i].nearest(z);candidate=(abs(point-z),i,point,t)

@@ -219,13 +219,16 @@ def optimize_one(p,context,maximum=True):
     q=intersection(p)
     if q is not None and abs(q[1]-p[0])<25:seeds.append(q[1])
     # Pick the best sampled starts; preserve the unmodified candidates too.
-    ranked=sorted(seeds,key=lambda z:sampled_objective([(p[0],z,p[3])],context,maximum))
+    scores={}
+    for z in seeds:
+        if z not in scores:scores[z]=sampled_objective([(p[0],z,p[3])],context,maximum)
+    ranked=sorted(seeds,key=scores.__getitem__)
     best=[]
     for q in dict.fromkeys(ranked[:2]):
         objective=lambda xy:sampled_objective([(p[0],complex(*xy),p[3])],context,maximum)
         score,xy=nelder_mead(objective,[q.real,q.imag],iterations=140)
         best.append((score,(p[0],complex(*xy),p[3])))
-    for q in ranked:best.append((sampled_objective([(p[0],q,p[3])],context,maximum),(p[0],q,p[3])))
+    for q in dict.fromkeys(ranked):best.append((scores[q],(p[0],q,p[3])))
     return min(best,key=lambda r:r[0])[1]
 
 

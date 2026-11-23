@@ -180,5 +180,69 @@ class ReviewAcceptanceTests(unittest.TestCase):
             result=ff.fit(p,policy='single')
         self.assertEqual(search.call_count,1);self.assertFalse(result['within'])
 
+    def test_infeasible_cheap_lattice_seed_falls_back_to_full_search(self):
+        import fast_fit as ff
+        from tangent_constraints import TangentConflict
+        p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
+        original=ff.adjust_parts;calls=[]
+        def prepare(*args,**kwargs):
+            calls.append(args)
+            if len(calls)==1:raise TangentConflict()
+            return original(*args,**kwargs)
+        with patch.object(ff,'adjust_parts',side_effect=prepare),patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
+            result=ff.fit(p,policy='single',integer_step=1)
+        self.assertEqual(search.call_count,1);self.assertTrue(result['within'])
+
+
+class ReviewScalingTests(unittest.TestCase):
+    def test_box_tree_order_matches_exhaustive_bounds(self):
+        import math
+        from segment_index import BoxIndex
+        rng=random.Random(101)
+        boxes=[(0,0,0,0)]*8
+        for _ in range(64):
+            x,y=rng.uniform(-10,10),rng.uniform(-10,10)
+            boxes.append((x,x+rng.random(),y,y+rng.random()))
+        tree=BoxIndex(boxes)
+        for z in [0j,10+10j]+[complex(rng.uniform(-20,20),rng.uniform(-20,20)) for _ in range(30)]:
+            want=sorted((math.hypot(max(b[0]-z.real,0,z.real-b[1]),max(b[2]-z.imag,0,z.imag-b[3])),i) for i,b in enumerate(boxes))
+            self.assertEqual(list(tree.ordered(z)),want)
+        self.assertEqual(list(BoxIndex([]).ordered(0j)),[])
+
+    def test_composite_box_tree_preserves_projection_and_tie_order(self):
+        from merge_fit import CompositeContext
+        curves=tuple((complex(i),complex(i+.3,1),complex(i+.7,1),complex(i+1)) for i in range(16))
+        context=CompositeContext(curves);rng=random.Random(77)
+        self.assertIsNotNone(context.box_index)
+        for z in [0j,1+0j]+[complex(rng.uniform(-1,17),rng.uniform(-1,2)) for _ in range(50)]:
+            candidates=[(abs(p-z),i,p,t) for i,c in enumerate(context.contexts) for p,t in [c.nearest(z)]]
+            best=min(candidates,key=lambda r:r[:2])
+            self.assertEqual(context.nearest(z),(best[2],(best[1],best[3])))
+
+    def test_sparse_normal_system_matches_known_equations(self):
+        from search_core import normal_equations
+        rows=[(2,[1,0,3,0],.5),(-1,[0,2,0,0],2)]
+        matrix,rhs=normal_equations(rows,4,2)
+        self.assertEqual(matrix,[[.5,0,1.5,0],[0,8,0,0],[1.5,0,4.5,0],[0,0,0,0]])
+        self.assertEqual(rhs,[-1,4,-3,0])
+
+    def test_rejected_lm_steps_reuse_undamped_system(self):
+        import search_core as sc
+        p=(0j,1j,1+1j,1+0j)
+        # Every proposed position has the same score, so damping changes while
+        # the residual/Jacobian and its undamped normal system remain fixed.
+        with patch.object(sc,'sample_rows',return_value=([(1,[1,0],1),(1,[0,1],1)],[(1,1)])), \
+             patch.object(sc,'normal_equations',wraps=sc.normal_equations) as assemble:
+            x,score=sc.refine_lm(p,[0,0],None,iterations=6)
+        self.assertEqual(x,[0,0]);self.assertEqual(score,1)
+        self.assertEqual(assemble.call_count,1)
+
+    def test_score_path_does_not_build_jacobians(self):
+        import search_core as sc
+        p=(0j,1j,1+1j,1+0j);context=sc.Context(p)
+        with patch.object(sc,'basis',side_effect=AssertionError('scoring allocated Jacobian')):
+            norms=sc.sample_norms([single_l2(p)],context)
+        self.assertTrue(norms)
+
 
 if __name__=='__main__':unittest.main()

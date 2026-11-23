@@ -1,6 +1,38 @@
 # -*- coding: utf-8 -*-
 """Exact nearest-segment queries, accelerated by a small AABB tree."""
 import math
+import heapq
+
+
+class BoxIndex:
+    """Visit curve control-hull boxes by increasing distance lower bound."""
+    def __init__(self,boxes):
+        self.boxes=tuple(boxes)
+        def build(ids):
+            box=(min(boxes[i][0] for i in ids),max(boxes[i][1] for i in ids),
+                 min(boxes[i][2] for i in ids),max(boxes[i][3] for i in ids))
+            if len(ids)<=4:return box,ids,None
+            axis=0 if box[1]-box[0]>=box[3]-box[2] else 2
+            ids.sort(key=lambda i:boxes[i][axis]+boxes[i][axis+1])
+            middle=len(ids)//2
+            return box,build(ids[:middle]),build(ids[middle:])
+        self.root=build(list(range(len(boxes)))) if boxes else None
+
+    def ordered(self,z):
+        if self.root is None:return
+        def lower(box):
+            return math.hypot(max(box[0]-z.real,0,z.real-box[1]),
+                              max(box[2]-z.imag,0,z.imag-box[3]))
+        serial=0;heap=[(lower(self.root[0]),0,serial,self.root)]
+        while heap:
+            bound,kind,index,node=heapq.heappop(heap)
+            if kind:
+                yield bound,index
+            elif node[2] is None:
+                for i in node[1]:heapq.heappush(heap,(lower(self.boxes[i]),1,i,None))
+            else:
+                for child in node[1:]:
+                    serial+=1;heapq.heappush(heap,(lower(child[0]),0,serial,child))
 
 
 class SegmentIndex:

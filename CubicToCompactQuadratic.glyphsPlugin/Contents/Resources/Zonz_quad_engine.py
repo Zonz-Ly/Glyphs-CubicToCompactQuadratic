@@ -693,6 +693,38 @@ def diagnostics(p, parts):
 # -*- coding: utf-8 -*-
 """Exact nearest-segment queries, accelerated by a small AABB tree."""
 import math
+import heapq
+
+
+class BoxIndex:
+    """Visit curve control-hull boxes by increasing distance lower bound."""
+    def __init__(self,boxes):
+        self.boxes=tuple(boxes)
+        def build(ids):
+            box=(min(boxes[i][0] for i in ids),max(boxes[i][1] for i in ids),
+                 min(boxes[i][2] for i in ids),max(boxes[i][3] for i in ids))
+            if len(ids)<=4:return box,ids,None
+            axis=0 if box[1]-box[0]>=box[3]-box[2] else 2
+            ids.sort(key=lambda i:boxes[i][axis]+boxes[i][axis+1])
+            middle=len(ids)//2
+            return box,build(ids[:middle]),build(ids[middle:])
+        self.root=build(list(range(len(boxes)))) if boxes else None
+
+    def ordered(self,z):
+        if self.root is None:return
+        def lower(box):
+            return math.hypot(max(box[0]-z.real,0,z.real-box[1]),
+                              max(box[2]-z.imag,0,z.imag-box[3]))
+        serial=0;heap=[(lower(self.root[0]),0,serial,self.root)]
+        while heap:
+            bound,kind,index,node=heapq.heappop(heap)
+            if kind:
+                yield bound,index
+            elif node[2] is None:
+                for i in node[1]:heapq.heappush(heap,(lower(self.boxes[i]),1,i,None))
+            else:
+                for child in node[1:]:
+                    serial+=1;heapq.heappush(heap,(lower(child[0]),0,serial,child))
 
 
 class SegmentIndex:
@@ -1016,13 +1048,16 @@ def optimize_one(p,context,maximum=True):
     q=intersection(p)
     if q is not None and abs(q[1]-p[0])<25:seeds.append(q[1])
     # Pick the best sampled starts; preserve the unmodified candidates too.
-    ranked=sorted(seeds,key=lambda z:sampled_objective([(p[0],z,p[3])],context,maximum))
+    scores={}
+    for z in seeds:
+        if z not in scores:scores[z]=sampled_objective([(p[0],z,p[3])],context,maximum)
+    ranked=sorted(seeds,key=scores.__getitem__)
     best=[]
     for q in dict.fromkeys(ranked[:2]):
         objective=lambda xy:sampled_objective([(p[0],complex(*xy),p[3])],context,maximum)
         score,xy=nelder_mead(objective,[q.real,q.imag],iterations=140)
         best.append((score,(p[0],complex(*xy),p[3])))
-    for q in ranked:best.append((sampled_objective([(p[0],q,p[3])],context,maximum),(p[0],q,p[3])))
+    for q in dict.fromkeys(ranked):best.append((scores[q],(p[0],q,p[3])))
     return min(best,key=lambda r:r[0])[1]
 
 
@@ -1140,13 +1175,28 @@ def basis(s,segment,count):
     return [v for w in weights for v in (complex(w,0),complex(0,w))]
 
 
+def forward_projection(z,parts):
+    return min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+
+
+def reverse_projections(parts,context,reverse_count):
+    """Shared geometry only; scoring never constructs tangent/Jacobian rows."""
+    for i,q in enumerate(parts):
+        for k in range(reverse_count):
+            s=k/(reverse_count-1)
+            position=quadratic(q,s)
+            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
+            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
+            target,t=context.nearest(position)
+            yield i,s,position-target,weight,t
+
+
 def sample_rows(parts,context,reverse_count=None):
     """Residual/Jacobian rows with balanced, arc-length-aware weights."""
     reverse_count=reverse_count or context.reverse_count
     count=len(parts);rows=[];norms=[]
     for z,weight in context.samples:
-        candidates=[nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)]
-        distance,s,i=min(candidates,key=lambda v:v[0]);q=parts[i]
+        distance,s,i=forward_projection(z,parts);q=parts[i]
         value=quadratic(q,s);der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
         jac=basis(s,i,count);difference=value-z
         if abs(der)>1e-12 and 1e-7<s<1-1e-7:
@@ -1157,16 +1207,9 @@ def sample_rows(parts,context,reverse_count=None):
             rows.append((difference.imag,[v.imag for v in jac],weight*.5))
         norms.append((distance,weight*.5))
     reverse=[];length=0.0
-    for i,q in enumerate(parts):
-        for k in range(reverse_count):
-            s=k/(reverse_count-1)
-            position=quadratic(q,s)
-            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
-            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
-            target,t=context.nearest(position)
-            tangent=context.tangent(t)
-            jac=basis(s,i,count);difference=position-target
-            reverse.append((difference,tangent,jac,weight,t));length+=weight
+    for i,s,difference,weight,t in reverse_projections(parts,context,reverse_count):
+        tangent=context.tangent(t);jac=basis(s,i,count)
+        reverse.append((difference,tangent,jac,weight,t));length+=weight
     length=max(length,1e-15)
     for difference,tangent,jac,weight,t in reverse:
         weight=weight/length*.5
@@ -1185,17 +1228,11 @@ def sample_norms(parts,context,reverse_count=None):
     reverse_count=reverse_count or context.reverse_count
     norms=[]
     for z,weight in context.samples:
-        distance=min(nearest_quadratic(z,q)[0] for q in parts)
+        distance=forward_projection(z,parts)[0]
         norms.append((distance,weight*.5))
     reverse=[];length=0.0
-    for q in parts:
-        for k in range(reverse_count):
-            s=k/(reverse_count-1)
-            position=quadratic(q,s)
-            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
-            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
-            target,t=context.nearest(position)
-            reverse.append((abs(position-target),weight));length+=weight
+    for i,s,difference,weight,t in reverse_projections(parts,context,reverse_count):
+        reverse.append((abs(difference),weight));length+=weight
     length=max(length,1e-15)
     norms.extend((d,w/length*.5) for d,w in reverse)
     return norms
@@ -1206,21 +1243,29 @@ def score_norms(norms,power=2):
     return sum(w*d**power for d,w in norms)**(1.0/power)
 
 
+def normal_equations(rows,dim,power):
+    """Assemble the undamped system, visiting only nonzero local derivatives."""
+    matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim
+    largest=max([abs(r) for r,j,w in rows]+[1e-12])
+    for r,jac,weight in rows:
+        weight*=max(abs(r)/largest,.001)**(power-2)
+        active=[(i,v) for i,v in enumerate(jac) if v]
+        for i,a in active:
+            rhs[i]-=weight*a*r
+            for j,b in active:matrix[i][j]+=weight*a*b
+    return matrix,rhs
+
+
 def refine_lm(p,x,context,power=2,iterations=25):
     """Normal-distance Gauss-Newton/LM; accept only improved true objectives."""
     x=list(x);damping=1e-4
     rows,norms=sample_rows(unpack(p,x),context)
     score=score_norms(norms,power)
+    system=None
     for _ in range(iterations):
-        dim=len(x);matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim
-        largest=max([abs(r) for r,j,w in rows]+[1e-12])
-        for r,jac,weight in rows:
-            # Relative IRLS weights avoid tiny fourth-power normal matrices.
-            weight*=max(abs(r)/largest,.001)**(power-2)
-            for i in range(dim):
-                rhs[i]-=weight*jac[i]*r
-                for j in range(dim):matrix[i][j]+=weight*jac[i]*jac[j]
-        for i in range(dim):matrix[i][i]+=damping*max(matrix[i][i],1e-9)
+        if system is None:system=normal_equations(rows,len(x),power)
+        base,rhs=system;matrix=[row[:] for row in base]
+        for i in range(len(x)):matrix[i][i]+=damping*max(matrix[i][i],1e-9)
         try:step=solve(matrix,rhs)
         except ValueError:break
         maximum=max(map(abs,step))
@@ -1233,6 +1278,7 @@ def refine_lm(p,x,context,power=2,iterations=25):
         if newscore<score:
             improvement=score-newscore
             x,rows,norms,score=proposed,newrows,newnorms,newscore
+            system=None
             damping=max(1e-9,damping*.3)
             if improvement<1e-10:break
         else:
@@ -1615,7 +1661,11 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
             if control is None:
                 seed=single_l2(p)
                 if single_parameter_bound(p,seed)<=tolerance:
-                    simple=prepare([seed]);upper=single_parameter_bound(p,simple[0])
+                    # Lattice feasibility can depend on the starting control.
+                    # A failed cheap attempt must not reject the search result.
+                    try:simple=prepare([seed])
+                    except TangentConflict:simple=None
+                    upper=single_parameter_bound(p,simple[0]) if simple is not None else float('inf')
                     if upper<=tolerance:
                         single_error=(0.0,upper) if check_error else None
                         norms=sample_norms([tuple((z-origin)/scale for z in q) for q in simple],Context(normal)) if metrics else None
@@ -1728,6 +1778,7 @@ class CompositeContext:
         self.reverse_count=reverse_count
         self.boxes=[(min(z.real for z in p),max(z.real for z in p),min(z.imag for z in p),max(z.imag for z in p)) for p in curves]
         self.box_allowance=max([1.0]+[abs(z) for p in curves for z in p])*1e-12
+        self.box_index=BoxIndex(self.boxes) if len(curves)>=16 else None
         if geometry is None:
             contexts=[Context(p,2,reverse_count) for p in curves];line=[];edges=[]
             for i,context in enumerate(contexts):
@@ -1753,7 +1804,8 @@ class CompositeContext:
             candidates=[(abs(point-z),i,point,t) for i,c in enumerate(self.contexts) for point,t in [c.nearest(z)]]
             best=min(candidates,key=lambda r:r[:2]);return best[2],(best[1],best[3])
         lower=lambda b:math.hypot(max(b[0]-z.real,0,z.real-b[1]),max(b[2]-z.imag,0,z.imag-b[3]))
-        ranked=sorted((lower(box),i) for i,box in enumerate(self.boxes));best=None
+        ranked=self.box_index.ordered(z) if self.box_index is not None else sorted((lower(box),i) for i,box in enumerate(self.boxes))
+        best=None
         for bound,i in ranked:
             if best is not None and bound-self.box_allowance>best[0]:break
             point,t=self.contexts[i].nearest(z);candidate=(abs(point-z),i,point,t)

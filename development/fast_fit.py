@@ -69,7 +69,11 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
             if control is None:
                 seed=single_l2(p)
                 if single_parameter_bound(p,seed)<=tolerance:
-                    simple=prepare([seed]);upper=single_parameter_bound(p,simple[0])
+                    # Lattice feasibility can depend on the starting control.
+                    # A failed cheap attempt must not reject the search result.
+                    try:simple=prepare([seed])
+                    except TangentConflict:simple=None
+                    upper=single_parameter_bound(p,simple[0]) if simple is not None else float('inf')
                     if upper<=tolerance:
                         single_error=(0.0,upper) if check_error else None
                         norms=sample_norms([tuple((z-origin)/scale for z in q) for q in simple],Context(normal)) if metrics else None

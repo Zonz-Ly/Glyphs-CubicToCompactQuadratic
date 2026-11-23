@@ -117,13 +117,28 @@ def basis(s,segment,count):
     return [v for w in weights for v in (complex(w,0),complex(0,w))]
 
 
+def forward_projection(z,parts):
+    return min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+
+
+def reverse_projections(parts,context,reverse_count):
+    """Shared geometry only; scoring never constructs tangent/Jacobian rows."""
+    for i,q in enumerate(parts):
+        for k in range(reverse_count):
+            s=k/(reverse_count-1)
+            position=quadratic(q,s)
+            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
+            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
+            target,t=context.nearest(position)
+            yield i,s,position-target,weight,t
+
+
 def sample_rows(parts,context,reverse_count=None):
     """Residual/Jacobian rows with balanced, arc-length-aware weights."""
     reverse_count=reverse_count or context.reverse_count
     count=len(parts);rows=[];norms=[]
     for z,weight in context.samples:
-        candidates=[nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)]
-        distance,s,i=min(candidates,key=lambda v:v[0]);q=parts[i]
+        distance,s,i=forward_projection(z,parts);q=parts[i]
         value=quadratic(q,s);der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
         jac=basis(s,i,count);difference=value-z
         if abs(der)>1e-12 and 1e-7<s<1-1e-7:
@@ -134,16 +149,9 @@ def sample_rows(parts,context,reverse_count=None):
             rows.append((difference.imag,[v.imag for v in jac],weight*.5))
         norms.append((distance,weight*.5))
     reverse=[];length=0.0
-    for i,q in enumerate(parts):
-        for k in range(reverse_count):
-            s=k/(reverse_count-1)
-            position=quadratic(q,s)
-            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
-            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
-            target,t=context.nearest(position)
-            tangent=context.tangent(t)
-            jac=basis(s,i,count);difference=position-target
-            reverse.append((difference,tangent,jac,weight,t));length+=weight
+    for i,s,difference,weight,t in reverse_projections(parts,context,reverse_count):
+        tangent=context.tangent(t);jac=basis(s,i,count)
+        reverse.append((difference,tangent,jac,weight,t));length+=weight
     length=max(length,1e-15)
     for difference,tangent,jac,weight,t in reverse:
         weight=weight/length*.5
@@ -162,17 +170,11 @@ def sample_norms(parts,context,reverse_count=None):
     reverse_count=reverse_count or context.reverse_count
     norms=[]
     for z,weight in context.samples:
-        distance=min(nearest_quadratic(z,q)[0] for q in parts)
+        distance=forward_projection(z,parts)[0]
         norms.append((distance,weight*.5))
     reverse=[];length=0.0
-    for q in parts:
-        for k in range(reverse_count):
-            s=k/(reverse_count-1)
-            position=quadratic(q,s)
-            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
-            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
-            target,t=context.nearest(position)
-            reverse.append((abs(position-target),weight));length+=weight
+    for i,s,difference,weight,t in reverse_projections(parts,context,reverse_count):
+        reverse.append((abs(difference),weight));length+=weight
     length=max(length,1e-15)
     norms.extend((d,w/length*.5) for d,w in reverse)
     return norms
@@ -183,21 +185,29 @@ def score_norms(norms,power=2):
     return sum(w*d**power for d,w in norms)**(1.0/power)
 
 
+def normal_equations(rows,dim,power):
+    """Assemble the undamped system, visiting only nonzero local derivatives."""
+    matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim
+    largest=max([abs(r) for r,j,w in rows]+[1e-12])
+    for r,jac,weight in rows:
+        weight*=max(abs(r)/largest,.001)**(power-2)
+        active=[(i,v) for i,v in enumerate(jac) if v]
+        for i,a in active:
+            rhs[i]-=weight*a*r
+            for j,b in active:matrix[i][j]+=weight*a*b
+    return matrix,rhs
+
+
 def refine_lm(p,x,context,power=2,iterations=25):
     """Normal-distance Gauss-Newton/LM; accept only improved true objectives."""
     x=list(x);damping=1e-4
     rows,norms=sample_rows(unpack(p,x),context)
     score=score_norms(norms,power)
+    system=None
     for _ in range(iterations):
-        dim=len(x);matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim
-        largest=max([abs(r) for r,j,w in rows]+[1e-12])
-        for r,jac,weight in rows:
-            # Relative IRLS weights avoid tiny fourth-power normal matrices.
-            weight*=max(abs(r)/largest,.001)**(power-2)
-            for i in range(dim):
-                rhs[i]-=weight*jac[i]*r
-                for j in range(dim):matrix[i][j]+=weight*jac[i]*jac[j]
-        for i in range(dim):matrix[i][i]+=damping*max(matrix[i][i],1e-9)
+        if system is None:system=normal_equations(rows,len(x),power)
+        base,rhs=system;matrix=[row[:] for row in base]
+        for i in range(len(x)):matrix[i][i]+=damping*max(matrix[i][i],1e-9)
         try:step=solve(matrix,rhs)
         except ValueError:break
         maximum=max(map(abs,step))
@@ -210,6 +220,7 @@ def refine_lm(p,x,context,power=2,iterations=25):
         if newscore<score:
             improvement=score-newscore
             x,rows,norms,score=proposed,newrows,newnorms,newscore
+            system=None
             damping=max(1e-9,damping*.3)
             if improvement<1e-10:break
         else:
