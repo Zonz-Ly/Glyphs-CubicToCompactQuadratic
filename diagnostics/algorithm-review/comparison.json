@@ -1,0 +1,58 @@
+{
+  "nearest_1950": {
+    "baseline_seconds": 0.014273375000000033,
+    "final_seconds": 0.013521916999999994,
+    "speedup": 1.0555733332781172,
+    "identical_result": true,
+    "redundancy_identical": true
+  },
+  "symmetric_single": {
+    "baseline_seconds": 0.10315474999999996,
+    "final_seconds": 0.05936416600000005,
+    "speedup": 1.7376602241830512,
+    "identical_result": true,
+    "redundancy_identical": true
+  },
+  "unique_tangents": {
+    "baseline_seconds": 0.08345454200000013,
+    "final_seconds": 0.013612958000000064,
+    "speedup": 6.130522256808531,
+    "identical_result": true,
+    "redundancy_identical": true
+  },
+  "simple_float": {
+    "baseline_seconds": 0.08858699999999997,
+    "final_seconds": 9.958000000032108e-06,
+    "speedup": 8896.063466530863,
+    "identical_result": false,
+    "redundancy_identical": true
+  },
+  "simple_integer": {
+    "baseline_seconds": 0.09190558299999996,
+    "final_seconds": 0.015719166000000007,
+    "speedup": 5.8467213209657505,
+    "identical_result": false,
+    "redundancy_identical": true
+  },
+  "corresponding_integer": {
+    "baseline_seconds": 0.5572261670000005,
+    "final_seconds": 0.5234138329999998,
+    "speedup": 1.0645996186348416,
+    "identical_result": true,
+    "redundancy_identical": true
+  },
+  "bounds_three_parts": {
+    "baseline_seconds": 0.022184333000000223,
+    "final_seconds": 0.020031916999999844,
+    "speedup": 1.1074493269915404,
+    "identical_result": true,
+    "redundancy_identical": true
+  },
+  "nearest_32_curves": {
+    "baseline_seconds": 0.006350249999999669,
+    "final_seconds": 0.005576082999999787,
+    "speedup": 1.1388370653736521,
+    "identical_result": true,
+    "redundancy_identical": true
+  }
+}

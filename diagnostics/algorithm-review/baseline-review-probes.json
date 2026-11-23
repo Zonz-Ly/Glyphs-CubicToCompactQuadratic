@@ -1,0 +1,132 @@
+{
+  "prepared_nearest": {
+    "queries": 1950,
+    "old_s": 0.013933417000000003,
+    "new_s": 0.013281624999999991,
+    "speedup": 1.0490747178903193,
+    "identical": true
+  },
+  "integer_piece_cache": {
+    "old_s": 0.586978875,
+    "new_s": 0.5239333750000004,
+    "speedup": 1.1203311394316111,
+    "identical": true
+  },
+  "bounds_indexes": {
+    "old_s": 0.014987957999999857,
+    "new_s": 0.013542209000000582,
+    "speedup": 1.1067587274719517,
+    "identical": true
+  },
+  "unique_tangent_control": {
+    "old_s": 0.09538883400000042,
+    "new_s": 0.014150583000000161,
+    "speedup": 6.7409826153452,
+    "identical_geometry_and_bounds": true
+  },
+  "small_tolerance": {
+    "tolerance": 1e-05,
+    "parameter_error_upper": 1.443375669329891e-07,
+    "default_bounds": [
+      0.0,
+      0.0006897266514957314
+    ],
+    "adaptive_bounds": [
+      0.0,
+      5.002523630363687e-07
+    ]
+  },
+  "partition_counterexample": {
+    "got": [
+      [
+        0,
+        2
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        3,
+        2
+      ]
+    ],
+    "got_cost": [
+      3,
+      0.5,
+      5
+    ],
+    "optimum": [
+      [
+        0,
+        2
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        4,
+        1
+      ]
+    ],
+    "optimum_cost": [
+      3,
+      0.5,
+      3
+    ],
+    "synthetic_candidate_costs": true
+  },
+  "duplicate_selected_seed": {
+    "cubic": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        100.0
+      ],
+      [
+        100.0,
+        100.0
+      ],
+      [
+        100.0,
+        0.0
+      ]
+    ],
+    "old_s": 0.10273537499999996,
+    "new_s": 0.06260670800000057,
+    "speedup": 1.6409643356427404,
+    "identical": true
+  },
+  "unique_tangent_passing": {
+    "cubic": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        33.0,
+        66.0
+      ],
+      [
+        66.5,
+        67.0
+      ],
+      [
+        100.0,
+        0.0
+      ]
+    ],
+    "old_s": 0.0835936670000006,
+    "new_s": 0.014437208000000368,
+    "speedup": 5.790154647629823,
+    "identical_geometry_and_bounds": true,
+    "error": [
+      0.122796478004362,
+      0.13227057699642597
+    ]
+  }
+}
