@@ -92,6 +92,18 @@ def nearest_quadratic(z,q):
     return abs(a+b*t+c*t*t),t
 
 
+def single_parameter_bound(p,q):
+    """Bound both directions using the same-parameter cubic/quadratic error.
+
+    The L2 control has exact maximum |D|/(12 sqrt(3)). Moving that control
+    adds at most half its displacement. A failed bound is inconclusive.
+    """
+    if q[0]!=p[0] or q[2]!=p[3]:return float('inf')
+    d=p[3]-3*p[2]+3*p[1]-p[0]
+    allowance=max([1.0]+list(map(abs,p))+list(map(abs,q)))*1e-10
+    return abs(d)/(12*math.sqrt(3))+abs(q[1]-single_l2(p)[1])/2+allowance
+
+
 def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,source_cache=None,source_curves=None):
     """Conservative continuous bidirectional Hausdorff interval.
 

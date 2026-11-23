@@ -54,9 +54,6 @@ class ReviewCorrectnessTests(unittest.TestCase):
                         self.check_partition(costs,length,cyclic)
 
 
-if __name__=='__main__':unittest.main()
-
-
 class ReviewRedundancyTests(unittest.TestCase):
     def test_precomputed_quadratic_queries_preserve_arithmetic(self):
         from geometry_fit import nearest_quadratic,quadratic_coefficients
@@ -120,7 +117,9 @@ class ReviewRedundancyTests(unittest.TestCase):
         import fast_fit as ff
         p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
         rays=((p[0],p[1]-p[0]),(p[3],p[2]-p[3]))
-        with patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
+        with patch.object(ff,'single_parameter_bound',return_value=float('inf')), \
+             patch.object(ff,'unique_tangent_control',side_effect=AssertionError('integer rays are not unique')), \
+             patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
             ff.fit(p,policy='single',tangents=rays,integer_step=1)
         self.assertEqual(search.call_count,1)
 
@@ -135,3 +134,51 @@ class ReviewRedundancyTests(unittest.TestCase):
         self.assertGreaterEqual(len(caches),2)
         self.assertTrue(all(cache is caches[0] for cache in caches))
         self.assertTrue(caches[0])
+
+
+class ReviewAcceptanceTests(unittest.TestCase):
+    def test_parameter_bound_covers_sampled_error_with_adjusted_controls(self):
+        from geometry_fit import single_parameter_bound
+        from quad_fit import cubic,quadratic
+        import math
+        rng=random.Random(20261123)
+        times=[i/100 for i in range(101)]+[(3-math.sqrt(3))/6,(3+math.sqrt(3))/6]
+        for scale,origin in ((1,0j),(1000,1e6+2e6j),(.0001,2-3j)):
+            for _ in range(20):
+                p=tuple(origin+scale*complex(rng.uniform(-2,2),rng.uniform(-2,2)) for _ in range(4))
+                q=single_l2(p);q=(q[0],q[1]+scale*complex(.1,-.2),q[2])
+                bound=single_parameter_bound(p,q)
+                for t in times:self.assertLessEqual(abs(cubic(p,t)-quadratic(q,t)),bound)
+
+    def test_passing_seed_skips_search_in_float_and_integer_modes(self):
+        import fast_fit as ff
+        p=(0j,33+66j,66.5+67j,100+0j)
+        for step in (0,1):
+            with patch.object(ff,'optimize_one',side_effect=AssertionError('unnecessary search')):
+                result=ff.fit(p,policy='single',integer_step=step)
+            self.assertTrue(result['within'])
+            independent=geometric_bounds(p,result['parts'],.5)
+            self.assertLessEqual(independent[1],.5)
+            if step:self.assertTrue(all(z.real.is_integer() and z.imag.is_integer() for q in result['parts'] for z in q))
+
+    def test_failed_proof_falls_back_to_search(self):
+        import fast_fit as ff
+        from mock_glyphs import HARD
+        ff.numeric_cache().clear()
+        with patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
+            result=ff.fit(HARD,policy='single')
+        self.assertEqual(search.call_count,1)
+        self.assertIsNotNone(result['error'])
+
+    def test_adjusted_seed_must_pass_proof(self):
+        import fast_fit as ff
+        p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
+        # A large control movement invalidates the cheap proof even though the
+        # original L2 candidate passes. The full optimizer must still run.
+        def moved(curves,parts,*args,**kwargs):return [(p[0],1000j,p[3])]
+        with patch.object(ff,'adjust_parts',side_effect=moved),patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
+            result=ff.fit(p,policy='single')
+        self.assertEqual(search.call_count,1);self.assertFalse(result['within'])
+
+
+if __name__=='__main__':unittest.main()

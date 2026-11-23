@@ -903,6 +903,18 @@ def nearest_quadratic(z,q):
     return abs(a+b*t+c*t*t),t
 
 
+def single_parameter_bound(p,q):
+    """Bound both directions using the same-parameter cubic/quadratic error.
+
+    The L2 control has exact maximum |D|/(12 sqrt(3)). Moving that control
+    adds at most half its displacement. A failed bound is inconclusive.
+    """
+    if q[0]!=p[0] or q[2]!=p[3]:return float('inf')
+    d=p[3]-3*p[2]+3*p[1]-p[0]
+    allowance=max([1.0]+list(map(abs,p))+list(map(abs,q)))*1e-10
+    return abs(d)/(12*math.sqrt(3))+abs(q[1]-single_l2(p)[1])/2+allowance
+
+
 def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,source_cache=None,source_curves=None):
     """Conservative continuous bidirectional Hausdorff interval.
 
@@ -1615,6 +1627,13 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
         try:
             control=unique_tangent_control(tangents) if not integer_step else None
             if control is None:
+                seed=single_l2(p)
+                if single_parameter_bound(p,seed)<=tolerance:
+                    simple=prepare([seed]);upper=single_parameter_bound(p,simple[0])
+                    if upper<=tolerance:
+                        single_error=(0.0,upper) if check_error else None
+                        norms=sample_norms([tuple((z-origin)/scale for z in q) for q in simple],Context(normal)) if metrics else None
+                        return result(simple,single_error,'ONE QUADRATIC',norms)
                 key=('one',normal)
                 if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
                 parts=restore([cache[key]])
