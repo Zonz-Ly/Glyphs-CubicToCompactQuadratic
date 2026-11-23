@@ -1,57 +1,57 @@
 {
   "nearest_1950": {
     "baseline_seconds": 0.014273375000000033,
-    "final_seconds": 0.013521916999999994,
-    "speedup": 1.0555733332781172,
+    "final_seconds": 0.013636500000000051,
+    "speedup": 1.0467036996296688,
     "identical_result": true,
     "redundancy_identical": true
   },
   "symmetric_single": {
     "baseline_seconds": 0.10315474999999996,
-    "final_seconds": 0.05936416600000005,
-    "speedup": 1.7376602241830512,
+    "final_seconds": 0.05956145800000001,
+    "speedup": 1.7319043801782008,
     "identical_result": true,
     "redundancy_identical": true
   },
   "unique_tangents": {
     "baseline_seconds": 0.08345454200000013,
-    "final_seconds": 0.013612958000000064,
-    "speedup": 6.130522256808531,
+    "final_seconds": 0.013561542000000038,
+    "speedup": 6.153764962715885,
     "identical_result": true,
     "redundancy_identical": true
   },
   "simple_float": {
     "baseline_seconds": 0.08858699999999997,
-    "final_seconds": 9.958000000032108e-06,
-    "speedup": 8896.063466530863,
-    "identical_result": false,
+    "final_seconds": 0.08525745799999995,
+    "speedup": 1.0390527946540469,
+    "identical_result": true,
     "redundancy_identical": true
   },
   "simple_integer": {
     "baseline_seconds": 0.09190558299999996,
-    "final_seconds": 0.015719166000000007,
-    "speedup": 5.8467213209657505,
-    "identical_result": false,
+    "final_seconds": 0.08831404199999993,
+    "speedup": 1.0406678362654949,
+    "identical_result": true,
     "redundancy_identical": true
   },
   "corresponding_integer": {
     "baseline_seconds": 0.5572261670000005,
-    "final_seconds": 0.5234138329999998,
-    "speedup": 1.0645996186348416,
+    "final_seconds": 0.5253629999999996,
+    "speedup": 1.060649811654039,
     "identical_result": true,
     "redundancy_identical": true
   },
   "bounds_three_parts": {
     "baseline_seconds": 0.022184333000000223,
-    "final_seconds": 0.020031916999999844,
-    "speedup": 1.1074493269915404,
+    "final_seconds": 0.019993624999999682,
+    "speedup": 1.109570325541295,
     "identical_result": true,
     "redundancy_identical": true
   },
   "nearest_32_curves": {
     "baseline_seconds": 0.006350249999999669,
-    "final_seconds": 0.005576082999999787,
-    "speedup": 1.1388370653736521,
+    "final_seconds": 0.005596666999999833,
+    "speedup": 1.1346485327785016,
     "identical_result": true,
     "redundancy_identical": true
   }

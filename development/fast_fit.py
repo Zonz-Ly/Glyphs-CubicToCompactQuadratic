@@ -3,7 +3,7 @@
 import math
 from concurrent.futures import CancelledError
 from quad_fit import single_l2,diagnostics
-from geometry_fit import make_context,optimize_one,geometric_bounds,nelder_mead,single_parameter_bound
+from geometry_fit import make_context,optimize_one,geometric_bounds,nelder_mead
 from search_core import (Context,pack,unpack,pair_seeds,choose_diverse,sample_norms,
                          score_norms,refine_lm,numeric_cache,unique_vectors)
 from chain_fit import optimize_chain,subdivision_seed
@@ -67,17 +67,6 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
         try:
             control=unique_tangent_control(tangents) if not integer_step else None
             if control is None:
-                seed=single_l2(p)
-                if single_parameter_bound(p,seed)<=tolerance:
-                    # Lattice feasibility can depend on the starting control.
-                    # A failed cheap attempt must not reject the search result.
-                    try:simple=prepare([seed])
-                    except TangentConflict:simple=None
-                    upper=single_parameter_bound(p,simple[0]) if simple is not None else float('inf')
-                    if upper<=tolerance:
-                        single_error=(0.0,upper) if check_error else None
-                        norms=sample_norms([tuple((z-origin)/scale for z in q) for q in simple],Context(normal)) if metrics else None
-                        return result(simple,single_error,'ONE QUADRATIC',norms)
                 key=('one',normal)
                 if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
                 parts=restore([cache[key]])

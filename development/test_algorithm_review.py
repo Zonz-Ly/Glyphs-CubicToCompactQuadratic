@@ -117,8 +117,7 @@ class ReviewRedundancyTests(unittest.TestCase):
         import fast_fit as ff
         p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
         rays=((p[0],p[1]-p[0]),(p[3],p[2]-p[3]))
-        with patch.object(ff,'single_parameter_bound',return_value=float('inf')), \
-             patch.object(ff,'unique_tangent_control',side_effect=AssertionError('integer rays are not unique')), \
+        with patch.object(ff,'unique_tangent_control',side_effect=AssertionError('integer rays are not unique')), \
              patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
             ff.fit(p,policy='single',tangents=rays,integer_step=1)
         self.assertEqual(search.call_count,1)
@@ -136,62 +135,34 @@ class ReviewRedundancyTests(unittest.TestCase):
         self.assertTrue(caches[0])
 
 
-class ReviewAcceptanceTests(unittest.TestCase):
-    def test_parameter_bound_covers_sampled_error_with_adjusted_controls(self):
-        from geometry_fit import single_parameter_bound
-        from quad_fit import cubic,quadratic
-        import math
-        rng=random.Random(20261123)
-        times=[i/100 for i in range(101)]+[(3-math.sqrt(3))/6,(3+math.sqrt(3))/6]
-        for scale,origin in ((1,0j),(1000,1e6+2e6j),(.0001,2-3j)):
-            for _ in range(20):
-                p=tuple(origin+scale*complex(rng.uniform(-2,2),rng.uniform(-2,2)) for _ in range(4))
-                q=single_l2(p);q=(q[0],q[1]+scale*complex(.1,-.2),q[2])
-                bound=single_parameter_bound(p,q)
-                for t in times:self.assertLessEqual(abs(cubic(p,t)-quadratic(q,t)),bound)
-
-    def test_passing_seed_skips_search_in_float_and_integer_modes(self):
+class ReviewFullSearchTests(unittest.TestCase):
+    def check_full_search(self,step,control,error):
         import fast_fit as ff
         p=(0j,33+66j,66.5+67j,100+0j)
-        for step in (0,1):
-            with patch.object(ff,'optimize_one',side_effect=AssertionError('unnecessary search')):
-                result=ff.fit(p,policy='single',integer_step=step)
-            self.assertTrue(result['within'])
-            independent=geometric_bounds(p,result['parts'],.5)
-            self.assertLessEqual(independent[1],.5)
-            if step:self.assertTrue(all(z.real.is_integer() and z.imag.is_integer() for q in result['parts'] for z in q))
+        expected=[(p[0],control,p[3])]
+        for tolerance in (.5,10):
+            for check_error in (False,True):
+                with self.subTest(step=step,tolerance=tolerance,check_error=check_error):
+                    ff.numeric_cache().clear()
+                    with patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
+                        result=ff.fit(p,policy='single',tolerance=tolerance,
+                                      integer_step=step,check_error=check_error)
+                    self.assertEqual(search.call_count,1)
+                    self.assertEqual(result['parts'],expected)
+                    if check_error:
+                        self.assertEqual(result['error'],geometric_bounds(p,expected,tolerance))
+                        if tolerance==.5:self.assertEqual(result['error'],error)
+                    else:self.assertIsNone(result['error'])
+                    # Cached calls must retain the same fully optimized result.
+                    self.assertEqual(ff.fit(p,policy='single',tolerance=tolerance,
+                                            integer_step=step,check_error=check_error),result)
 
-    def test_failed_proof_falls_back_to_search(self):
-        import fast_fit as ff
-        from mock_glyphs import HARD
-        ff.numeric_cache().clear()
-        with patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
-            result=ff.fit(HARD,policy='single')
-        self.assertEqual(search.call_count,1)
-        self.assertIsNotNone(result['error'])
+    def test_float_candidate_keeps_original_full_search_accuracy(self):
+        self.check_full_search(0,complex(50.001013530356474,99.77621812543585),
+                               (0.012522450042288686,0.02199618918878388))
 
-    def test_adjusted_seed_must_pass_proof(self):
-        import fast_fit as ff
-        p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
-        # A large control movement invalidates the cheap proof even though the
-        # original L2 candidate passes. The full optimizer must still run.
-        def moved(curves,parts,*args,**kwargs):return [(p[0],1000j,p[3])]
-        with patch.object(ff,'adjust_parts',side_effect=moved),patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
-            result=ff.fit(p,policy='single')
-        self.assertEqual(search.call_count,1);self.assertFalse(result['within'])
-
-    def test_infeasible_cheap_lattice_seed_falls_back_to_full_search(self):
-        import fast_fit as ff
-        from tangent_constraints import TangentConflict
-        p=(0j,33+66j,66.5+67j,100+0j);ff.numeric_cache().clear()
-        original=ff.adjust_parts;calls=[]
-        def prepare(*args,**kwargs):
-            calls.append(args)
-            if len(calls)==1:raise TangentConflict()
-            return original(*args,**kwargs)
-        with patch.object(ff,'adjust_parts',side_effect=prepare),patch.object(ff,'optimize_one',wraps=ff.optimize_one) as search:
-            result=ff.fit(p,policy='single',integer_step=1)
-        self.assertEqual(search.call_count,1);self.assertTrue(result['within'])
+    def test_integer_candidate_keeps_original_validation_bounds(self):
+        self.check_full_search(1,50+100j,(0.122796478004362,0.13227057699642597))
 
 
 class ReviewScalingTests(unittest.TestCase):
