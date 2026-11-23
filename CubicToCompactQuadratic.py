@@ -2718,7 +2718,7 @@ def show_message(text,title=None):
     from GlyphsApp import Message
     Message(title=title or tr('title'),message=text,OKButton=tr('ok'))
 
-def glyphs_main(tolerance=1.0,max_controls=3,add_midpoint=False,merge_curves=True,center_limit=7.0,integer_coords=True,angle_limit=3.0,keep_line_tangent=True,keep_curve_tangent=True):
+def glyphs_main(tolerance=1.0,max_controls=3,add_midpoint=False,merge_curves=True,center_limit=7.0,integer_coords=True,angle_limit=5.0,keep_line_tangent=True,keep_curve_tangent=True):
     from GlyphsApp import Glyphs
     job=make_job(tolerance,max_controls,add_midpoint,merge_curves=merge_curves,center_limit=center_limit,integer_coords=integer_coords,angle_limit=angle_limit,keep_line_tangent=keep_line_tangent,keep_curve_tangent=keep_curve_tangent)
     while True:

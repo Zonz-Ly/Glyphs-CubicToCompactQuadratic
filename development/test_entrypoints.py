@@ -100,6 +100,14 @@ def load(path,name):
     return m
 
 class EntryTests(unittest.TestCase):
+    def test_direct_entry_uses_the_configured_default_angle(self):
+        import glyphs_adapter
+        from preferences import DEFAULT_SETTINGS
+        with patch.dict(sys.modules,modules(Font([glyph()]))), \
+             patch.object(glyphs_adapter,'make_job',return_value=iter([])) as make:
+            glyphs_adapter.glyphs_main()
+        self.assertEqual(make.call_args.kwargs['angle_limit'],DEFAULT_SETTINGS['angle_limit'])
+
     def test_complete_standalone_in_font_view(self):
         a,b=glyph('A'),glyph('B');f=Font([a,b],edit=False);f.selection=[a,b]
         root,res=plugin_files()
