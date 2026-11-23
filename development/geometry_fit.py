@@ -49,11 +49,19 @@ def flatten_points(points, tolerance):
         if flatness <= tolerance or depth >= 24:
             out.append(p[-1]);worst = max(worst,flatness)
             continue
-        levels=[p]
-        while len(levels[-1])>1:
-            levels.append(tuple((a+b)/2 for a,b in zip(levels[-1],levels[-1][1:])))
-        a = tuple(row[0] for row in levels)
-        b = tuple(row[-1] for row in reversed(levels))
+        if len(p)==3:
+            p0,p1,p2=p;u=(p0+p1)/2;v=(p1+p2)/2;m=(u+v)/2
+            a=(p0,u,m);b=(m,v,p2)
+        elif len(p)==4:
+            p0,p1,p2,p3=p;u=(p0+p1)/2;v=(p1+p2)/2;w=(p2+p3)/2
+            left=(u+v)/2;right=(v+w)/2;m=(left+right)/2
+            a=(p0,u,left,m);b=(m,right,w,p3)
+        else:
+            levels=[p]
+            while len(levels[-1])>1:
+                levels.append(tuple((a+b)/2 for a,b in zip(levels[-1],levels[-1][1:])))
+            a = tuple(row[0] for row in levels)
+            b = tuple(row[-1] for row in reversed(levels))
         stack.append((b,depth+1));stack.append((a,depth+1))
     return out,worst
 
@@ -88,8 +96,11 @@ def nearest_quadratic(z,q):
     a=q[0]-z;b,c,bb,bc,cc=quadratic_coefficients(tuple(q))
     coeff=(dot(a,b),bb+2*dot(a,c),bc,cc)
     candidates=[0.0,1.0]+polynomial_roots_unit(coeff)
-    t=min(candidates,key=lambda t:abs(a+b*t+c*t*t))
-    return abs(a+b*t+c*t*t),t
+    t=candidates[0];distance=abs(a+b*t+c*t*t)
+    for value in candidates[1:]:
+        measured=abs(a+b*value+c*value*value)
+        if measured<distance:distance,t=measured,value
+    return distance,t
 
 
 def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,source_cache=None,source_curves=None):

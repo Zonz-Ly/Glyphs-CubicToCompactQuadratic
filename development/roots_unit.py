@@ -54,20 +54,18 @@ def polynomial_roots_unit(coeff):
         return inside([q/a,d/q] if q else [-b/(2*a)])
     if len(c)!=4:raise ValueError('Only degree <= 3 is used by this fitter')
     d,b,a,h=c
-    value=lambda t:((h*t+a)*t+b)*t+d
-    derivative=lambda t:(3*h*t+2*a)*t+b
     knots=[0.0]+polynomial_roots_unit([b,2*a,3*h])+[1.0]
-    roots=[t for t in knots if abs(value(t))<1e-11]
-    for lo,hi in zip(knots,knots[1:]):
-        flo,fhi=value(lo),value(hi)
+    knot_values=[((h*t+a)*t+b)*t+d for t in knots]
+    roots=[t for t,v in zip(knots,knot_values) if abs(v)<1e-11]
+    for lo,hi,flo,fhi in zip(knots,knots[1:],knot_values,knot_values[1:]):
         if flo*fhi>=0:continue
         t=(lo+hi)/2
         for _ in range(26):
-            f=value(t)
+            f=((h*t+a)*t+b)*t+d
             if f==0:break
             if flo*f<=0:hi=t
             else:lo=t;flo=f
-            der=derivative(t)
+            der=(3*h*t+2*a)*t+b
             step=f/der if der else float('inf')
             proposal=t-step
             if abs(step)<2e-14 and lo<=proposal<=hi:
@@ -77,7 +75,7 @@ def polynomial_roots_unit(coeff):
         else:
             # Difficult nearly multiple roots retain a reliable bracket fallback.
             for _ in range(38):
-                t=(lo+hi)/2;f=value(t)
+                t=(lo+hi)/2;f=((h*t+a)*t+b)*t+d
                 if flo*f<=0:hi=t
                 else:lo=t;flo=f
             t=(lo+hi)/2

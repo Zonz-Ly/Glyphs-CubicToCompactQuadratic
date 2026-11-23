@@ -847,20 +847,18 @@ def polynomial_roots_unit(coeff):
         return inside([q/a,d/q] if q else [-b/(2*a)])
     if len(c)!=4:raise ValueError('Only degree <= 3 is used by this fitter')
     d,b,a,h=c
-    value=lambda t:((h*t+a)*t+b)*t+d
-    derivative=lambda t:(3*h*t+2*a)*t+b
     knots=[0.0]+polynomial_roots_unit([b,2*a,3*h])+[1.0]
-    roots=[t for t in knots if abs(value(t))<1e-11]
-    for lo,hi in zip(knots,knots[1:]):
-        flo,fhi=value(lo),value(hi)
+    knot_values=[((h*t+a)*t+b)*t+d for t in knots]
+    roots=[t for t,v in zip(knots,knot_values) if abs(v)<1e-11]
+    for lo,hi,flo,fhi in zip(knots,knots[1:],knot_values,knot_values[1:]):
         if flo*fhi>=0:continue
         t=(lo+hi)/2
         for _ in range(26):
-            f=value(t)
+            f=((h*t+a)*t+b)*t+d
             if f==0:break
             if flo*f<=0:hi=t
             else:lo=t;flo=f
-            der=derivative(t)
+            der=(3*h*t+2*a)*t+b
             step=f/der if der else float('inf')
             proposal=t-step
             if abs(step)<2e-14 and lo<=proposal<=hi:
@@ -870,7 +868,7 @@ def polynomial_roots_unit(coeff):
         else:
             # Difficult nearly multiple roots retain a reliable bracket fallback.
             for _ in range(38):
-                t=(lo+hi)/2;f=value(t)
+                t=(lo+hi)/2;f=((h*t+a)*t+b)*t+d
                 if flo*f<=0:hi=t
                 else:lo=t;flo=f
             t=(lo+hi)/2
@@ -927,11 +925,19 @@ def flatten_points(points, tolerance):
         if flatness <= tolerance or depth >= 24:
             out.append(p[-1]);worst = max(worst,flatness)
             continue
-        levels=[p]
-        while len(levels[-1])>1:
-            levels.append(tuple((a+b)/2 for a,b in zip(levels[-1],levels[-1][1:])))
-        a = tuple(row[0] for row in levels)
-        b = tuple(row[-1] for row in reversed(levels))
+        if len(p)==3:
+            p0,p1,p2=p;u=(p0+p1)/2;v=(p1+p2)/2;m=(u+v)/2
+            a=(p0,u,m);b=(m,v,p2)
+        elif len(p)==4:
+            p0,p1,p2,p3=p;u=(p0+p1)/2;v=(p1+p2)/2;w=(p2+p3)/2
+            left=(u+v)/2;right=(v+w)/2;m=(left+right)/2
+            a=(p0,u,left,m);b=(m,right,w,p3)
+        else:
+            levels=[p]
+            while len(levels[-1])>1:
+                levels.append(tuple((a+b)/2 for a,b in zip(levels[-1],levels[-1][1:])))
+            a = tuple(row[0] for row in levels)
+            b = tuple(row[-1] for row in reversed(levels))
         stack.append((b,depth+1));stack.append((a,depth+1))
     return out,worst
 
@@ -966,8 +972,11 @@ def nearest_quadratic(z,q):
     a=q[0]-z;b,c,bb,bc,cc=quadratic_coefficients(tuple(q))
     coeff=(dot(a,b),bb+2*dot(a,c),bc,cc)
     candidates=[0.0,1.0]+polynomial_roots_unit(coeff)
-    t=min(candidates,key=lambda t:abs(a+b*t+c*t*t))
-    return abs(a+b*t+c*t*t),t
+    t=candidates[0];distance=abs(a+b*t+c*t*t)
+    for value in candidates[1:]:
+        measured=abs(a+b*value+c*value*value)
+        if measured<distance:distance,t=measured,value
+    return distance,t
 
 
 def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,source_cache=None,source_curves=None):
@@ -1131,6 +1140,11 @@ def polyline_parameterization(p,tolerance=1e-6):
 class Context:
     def __init__(self,p,count=65,reverse_count=25,geometry=None):
         self.p=p
+        self.differences=(p[1]-p[0],p[2]-p[1],p[3]-p[2],
+                          p[2]-2*p[1]+p[0],p[3]-2*p[2]+p[1])
+        self.power_coefficients=(p[0],3*self.differences[0],3*self.differences[3],
+                                 p[3]-3*p[2]+3*p[1]-p[0])
+        self.constant=all(v==p[0] for v in p)
         self.reverse_count=reverse_count
         if geometry is None:
             self.line,self.times=polyline_parameterization(p)
@@ -1176,8 +1190,8 @@ class Context:
         return t
 
     def tangent(self,t):
-        p=self.p;u=1-t
-        return 3*(u*u*(p[1]-p[0])+2*u*t*(p[2]-p[1])+t*t*(p[3]-p[2]))
+        d0,d1,d2,_,_=self.differences;u=1-t
+        return 3*(u*u*d0+2*u*t*d1+t*t*d2)
 
     def interior(self,t):
         return 1e-7<t<1-1e-7
@@ -1187,17 +1201,18 @@ class Context:
             _,index,fraction=self.index.nearest(z)
             t=self.parameter_at(index,fraction)
             return cubic(self.p,t),t
-        if all(v==self.p[0] for v in self.p):return self.p[0],0.0
+        if self.constant:return self.p[0],0.0
         best,index,part=self.index.nearest(z)
         # Refine the closest polyline location on the original cubic itself.
         a=self.times[max(0,index-1)];b=self.times[min(len(self.times)-1,index+2)]
         t=self.times[index]+part*(self.times[index+1]-self.times[index])
         p=self.p;converged=False;previous=None
+        d0,d1,d2,e0,e1=self.differences
         for _ in range(5):
             u=1-t
             pos=cubic(p,t)
-            der=3*(u*u*(p[1]-p[0])+2*u*t*(p[2]-p[1])+t*t*(p[3]-p[2]))
-            second=6*(u*(p[2]-2*p[1]+p[0])+t*(p[3]-2*p[2]+p[1]))
+            der=3*(u*u*d0+2*u*t*d1+t*t*d2)
+            second=6*(u*e0+t*e1)
             denominator=dot(der,der)+dot(pos-z,second)
             if denominator<=1e-15:break
             proposed=max(a,min(b,t-dot(pos-z,der)/denominator))
@@ -1210,15 +1225,17 @@ class Context:
         if not converged:
             # Keep every old candidate. Add all stationary parameters if the
             # local Newton solve fails, including nonpositive denominators.
-            coefficients=(p[0]-z,3*(p[1]-p[0]),3*(p[2]-2*p[1]+p[0]),
-                          p[3]-3*p[2]+3*p[1]-p[0])
+            coefficients=(p[0]-z,)+self.power_coefficients[1:]
             derivative=[i*v for i,v in enumerate(coefficients) if i]
             stationary=[0.0]*6
             for i,v in enumerate(coefficients):
                 for j,w in enumerate(derivative):stationary[i+j]+=dot(v,w)
             candidates.extend(polynomial_roots_interval(stationary))
-        t=min(candidates,key=lambda v:abs(cubic(p,v)-z))
-        return cubic(p,t),t
+        t=candidates[0];point=cubic(p,t);distance=abs(point-z)
+        for value in candidates[1:]:
+            candidate=cubic(p,value);measured=abs(candidate-z)
+            if measured<distance:distance,point,t=measured,candidate,value
+        return point,t
 
 
 def unpack(p,x):
@@ -1256,8 +1273,27 @@ def basis(s,segment,count):
     return [v for w in weights for v in (complex(w,0),complex(0,w))]
 
 
+class PreparedParts(list):
+    """Quadratic control-hull bounds shared by all forward objective queries."""
+    def __init__(self,parts):
+        super().__init__(parts)
+        self.boxes=[(min(z.real for z in q),max(z.real for z in q),
+                     min(z.imag for z in q),max(z.imag for z in q)) for q in self]
+        self.margin=max([1.0]+[abs(z) for q in self for z in q])*1e-12
+
+
 def forward_projection(z,parts):
-    return min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+    if len(parts)==1:return nearest_quadratic(z,parts[0])+(0,)
+    if not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
+    ranked=sorted((math.hypot(max(b[0]-z.real,0,z.real-b[1]),
+                              max(b[2]-z.imag,0,z.imag-b[3])),i)
+                  for i,b in enumerate(parts.boxes))
+    margin=max(parts.margin,abs(z)*1e-12);best=None
+    for bound,i in ranked:
+        if best is not None and bound-margin>best[0]:break
+        distance,t=nearest_quadratic(z,parts[i])
+        if best is None or (distance,i)<(best[0],best[2]):best=distance,t,i
+    return best
 
 
 def reverse_projections(parts,context,reverse_count):
@@ -1275,6 +1311,7 @@ def reverse_projections(parts,context,reverse_count):
 def sample_rows(parts,context,reverse_count=None):
     """Residual/Jacobian rows with balanced, arc-length-aware weights."""
     reverse_count=reverse_count or context.reverse_count
+    if len(parts)>1 and not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
     count=len(parts);rows=[];norms=[]
     for z,weight in context.samples:
         distance,s,i=forward_projection(z,parts);q=parts[i]
@@ -1307,6 +1344,7 @@ def sample_rows(parts,context,reverse_count=None):
 def sample_norms(parts,context,reverse_count=None):
     """Identical distance weights to sample_rows; omit unused Jacobians."""
     reverse_count=reverse_count or context.reverse_count
+    if len(parts)>1 and not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
     norms=[]
     for z,weight in context.samples:
         distance=forward_projection(z,parts)[0]
@@ -1589,7 +1627,11 @@ def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
                 a,d=rays[i];result.append(a+d/abs(d)*max(1e-10,values[k])*scale);k+=1
             else:result.append(origin+complex(values[k],values[k+1])*scale);k+=2
         return result
-    def score(values):cancel();return objective(decode(values))
+    def score(values):
+        cancel();candidate=decode(values)
+        if overlap is not None and any(not on_ray(candidate[0],ray) for ray in tangents):
+            return float('inf')
+        return objective(candidate)
     before=score(initial);after,values=nelder_mead(score,initial,step=.015,iterations=120)
     return decode(values) if after<before else controls
 
@@ -1958,11 +2000,15 @@ def single_quadratic_bound(curves,q):
 def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,center_tolerance=None):
     origin=curves[0][0];scale=max([abs(z-origin) for p in curves for z in p]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves)
-    cache=numeric_cache();key=('merged',normal,count)
-    if key not in cache:
-        cache[key],geometries[normal]=optimize_composite(normal,count,geometries.get(normal))
-        while len(cache)>64:cache.pop(next(iter(cache)))
-    parts=[tuple(origin+scale*z for z in q) for q in cache[key]]
+    control=unique_tangent_control(tangents) if count==1 and not integer_step else None
+    if control is not None:
+        parts=[(curves[0][0],control,curves[-1][3])]
+    else:
+        cache=numeric_cache();key=('merged',normal,count)
+        if key not in cache:
+            cache[key],geometries[normal]=optimize_composite(normal,count,geometries.get(normal))
+            while len(cache)>64:cache.pop(next(iter(cache)))
+        parts=[tuple(origin+scale*z for z in q) for q in cache[key]]
     parts=adjust_parts(curves,parts,tolerance,0.0,integer_step,explicit_midpoint,
                        context_factory=CompositeContext,cancel=cancel,tangents=tangents)
     if center_limit:

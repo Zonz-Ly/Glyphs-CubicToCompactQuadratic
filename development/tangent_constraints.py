@@ -128,6 +128,10 @@ def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
                 a,d=rays[i];result.append(a+d/abs(d)*max(1e-10,values[k])*scale);k+=1
             else:result.append(origin+complex(values[k],values[k+1])*scale);k+=2
         return result
-    def score(values):cancel();return objective(decode(values))
+    def score(values):
+        cancel();candidate=decode(values)
+        if overlap is not None and any(not on_ray(candidate[0],ray) for ray in tangents):
+            return float('inf')
+        return objective(candidate)
     before=score(initial);after,values=nelder_mead(score,initial,step=.015,iterations=120)
     return decode(values) if after<before else controls

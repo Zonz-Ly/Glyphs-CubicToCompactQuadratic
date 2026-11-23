@@ -107,6 +107,15 @@ class ProjectionPrecisionTests(unittest.TestCase):
 
 
 class ParallelConstraintTests(unittest.TestCase):
+    def test_nearly_parallel_common_domain_keeps_both_ray_checks(self):
+        rays=((0j,1+0j),(10+0j,1+1e-13j));calls=[]
+        def objective(values):
+            self.assertTrue(all(on_ray(values[0],ray) for ray in rays))
+            calls.append(values[0]);return abs(values[0]-1e7)**2
+        controls=optimize_constrained([12+0j],rays,0j,1e7,objective,lambda:None)
+        self.assertTrue(calls);self.assertTrue(all(on_ray(controls[0],ray) for ray in rays))
+        self.assertGreater(controls[0].real,12)
+
     def test_search_preserves_both_rays_at_interval_boundary(self):
         for rays,seed,target,boundary in (
             (((0j,1+0j),(10+0j,-1+0j)),2+0j,12+0j,10+0j),
@@ -172,6 +181,98 @@ class PartitionAvailabilityTests(unittest.TestCase):
         for error in (CancelledError,RuntimeError):
             with patch.object(mf,'fit_corresponding',side_effect=error('not a tangent conflict')):
                 with self.assertRaises(error):mf.fit_run_corresponding([self.chain()[:1]],1,1)
+
+
+
+
+class ConservativeProjectionTests(unittest.TestCase):
+    def test_forward_pruning_matches_exhaustive_projection(self):
+        import random
+        from search_core import PreparedParts,forward_projection,unpack
+        from geometry_fit import nearest_quadratic
+        rng=random.Random(20261124)
+        for _ in range(2000):
+            p=tuple(complex(rng.uniform(-1,1),rng.uniform(-1,1)) for _ in range(4))
+            parts=PreparedParts(unpack(p,[rng.uniform(-1,1) for _ in range(2*rng.randint(1,6))]))
+            for _ in range(10):
+                z=complex(rng.uniform(-2,2),rng.uniform(-2,2))
+                expected=min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+                self.assertEqual(forward_projection(z,parts),expected)
+
+    def test_same_distance_retains_original_index_after_bounds_sorting(self):
+        from search_core import forward_projection
+        from geometry_fit import nearest_quadratic
+        parts=[(-1-1j,)*3,(1+1j,3+0j,1-1j)]
+        expected=nearest_quadratic(0j,parts[0])+(0,)
+        self.assertEqual(forward_projection(0j,parts),expected)
+
+    def test_projection_margin_covers_extreme_query_scales(self):
+        from search_core import PreparedParts,forward_projection
+        from geometry_fit import nearest_quadratic
+        parts=PreparedParts([(0j,1+1j,2+0j),(2+0j,3-1j,4+0j),(4+0j,4+0j,4+0j)])
+        for z in (0j,1e-20+1e-20j,1e16+1j,-1e16+1e16j,4+1e-15j):
+            expected=min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+            self.assertEqual(forward_projection(z,parts),expected)
+
+    def test_pruning_skips_only_impossible_root_queries(self):
+        import search_core as sc
+        parts=sc.PreparedParts([(0j,0j,0j),(100+0j,110+1j,120+0j),(-120+0j,-110+1j,-100+0j)])
+        with patch.object(sc,'nearest_quadratic',wraps=sc.nearest_quadratic) as nearest:
+            self.assertEqual(sc.forward_projection(0j,parts),(0.,0.,0))
+        self.assertEqual(nearest.call_count,1)
+
+
+class MergedUniqueControlTests(unittest.TestCase):
+    def setUp(self):numeric_cache().clear()
+
+    def curves_and_rays(self):
+        from quad_fit import split
+        p=(0j,33+53j,67+53j,100+0j)
+        return split(p),((p[0],p[1]-p[0]),(p[3],p[2]-p[3]))
+
+    def test_unique_merged_control_skips_search_and_unconstrained_cache(self):
+        import merge_fit as mf
+        from tangent_constraints import unique_tangent_control
+        curves,rays=self.curves_and_rays();control=unique_tangent_control(rays)
+        with patch.object(mf,'optimize_composite',side_effect=AssertionError('no free control')), \
+             patch.object(mf,'CompositeContext',side_effect=AssertionError('no objective needed')):
+            result=mf.fit_merged_count(curves,1,1.,{}, {},tangents=rays)
+        self.assertEqual(result['parts'],[(curves[0][0],control,curves[-1][3])])
+        self.assertTrue(result['within']);self.assertEqual(numeric_cache(),{})
+
+    def test_different_rays_do_not_reuse_or_poison_unconstrained_solution(self):
+        import merge_fit as mf
+        curves,rays=self.curves_and_rays()
+        first=mf.fit_merged_count(curves,1,1.,{}, {})
+        before=dict(numeric_cache())
+        for other in (rays,((0j,1+2j),(100+0j,-1+2j))):
+            with patch.object(mf,'optimize_composite',side_effect=AssertionError('unique control')):
+                result=mf.fit_merged_count(curves,1,1.,{}, {},tangents=other)
+            self.assertTrue(all(on_ray(result['parts'][0][1],ray) for ray in other))
+            self.assertEqual(numeric_cache(),before)
+        self.assertEqual(mf.fit_merged_count(curves,1,1.,{}, {}),first)
+
+    def test_integer_mode_retains_composite_search(self):
+        import merge_fit as mf
+        curves,rays=self.curves_and_rays()
+        with patch.object(mf,'optimize_composite',wraps=mf.optimize_composite) as search:
+            mf.fit_merged_count(curves,1,1.,{}, {},tangents=rays,integer_step=1)
+        self.assertEqual(search.call_count,1)
+
+    def test_parallel_mode_retains_composite_search(self):
+        import merge_fit as mf
+        curves,rays=self.curves_and_rays()
+        with patch.object(mf,'optimize_composite',wraps=mf.optimize_composite) as search:
+            mf.fit_merged_count(curves,1,1.,{}, {},tangents=((0j,1+0j),(100+0j,-1+0j)))
+        self.assertEqual(search.call_count,1)
+
+    def test_impossible_unique_intersection_rejects_before_search(self):
+        import merge_fit as mf
+        from tangent_constraints import TangentConflict
+        curves,rays=self.curves_and_rays()
+        with patch.object(mf,'optimize_composite',side_effect=AssertionError('infeasible unique control')):
+            with self.assertRaises(TangentConflict):
+                mf.fit_merged_count(curves,1,1.,{}, {},tangents=((0j,-1-1j),(100+0j,-1+1j)))
 
 
 if __name__=='__main__':unittest.main()

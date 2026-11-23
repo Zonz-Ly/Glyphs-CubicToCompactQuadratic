@@ -9,7 +9,7 @@ from chain_fit import subdivision_seed
 from fast_fit import fit_corresponding,select_simpler
 from preferences import validated_settings
 from options_fit import adjust_parts,center_parts
-from tangent_constraints import smooth_join,TangentConflict
+from tangent_constraints import smooth_join,TangentConflict,unique_tangent_control
 from segment_index import BoxIndex
 
 class CompositeContext:
@@ -113,11 +113,15 @@ def single_quadratic_bound(curves,q):
 def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,center_tolerance=None):
     origin=curves[0][0];scale=max([abs(z-origin) for p in curves for z in p]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves)
-    cache=numeric_cache();key=('merged',normal,count)
-    if key not in cache:
-        cache[key],geometries[normal]=optimize_composite(normal,count,geometries.get(normal))
-        while len(cache)>64:cache.pop(next(iter(cache)))
-    parts=[tuple(origin+scale*z for z in q) for q in cache[key]]
+    control=unique_tangent_control(tangents) if count==1 and not integer_step else None
+    if control is not None:
+        parts=[(curves[0][0],control,curves[-1][3])]
+    else:
+        cache=numeric_cache();key=('merged',normal,count)
+        if key not in cache:
+            cache[key],geometries[normal]=optimize_composite(normal,count,geometries.get(normal))
+            while len(cache)>64:cache.pop(next(iter(cache)))
+        parts=[tuple(origin+scale*z for z in q) for q in cache[key]]
     parts=adjust_parts(curves,parts,tolerance,0.0,integer_step,explicit_midpoint,
                        context_factory=CompositeContext,cancel=cancel,tangents=tangents)
     if center_limit:

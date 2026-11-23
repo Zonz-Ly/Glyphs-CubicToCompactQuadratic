@@ -37,6 +37,11 @@ def polyline_parameterization(p,tolerance=1e-6):
 class Context:
     def __init__(self,p,count=65,reverse_count=25,geometry=None):
         self.p=p
+        self.differences=(p[1]-p[0],p[2]-p[1],p[3]-p[2],
+                          p[2]-2*p[1]+p[0],p[3]-2*p[2]+p[1])
+        self.power_coefficients=(p[0],3*self.differences[0],3*self.differences[3],
+                                 p[3]-3*p[2]+3*p[1]-p[0])
+        self.constant=all(v==p[0] for v in p)
         self.reverse_count=reverse_count
         if geometry is None:
             self.line,self.times=polyline_parameterization(p)
@@ -82,8 +87,8 @@ class Context:
         return t
 
     def tangent(self,t):
-        p=self.p;u=1-t
-        return 3*(u*u*(p[1]-p[0])+2*u*t*(p[2]-p[1])+t*t*(p[3]-p[2]))
+        d0,d1,d2,_,_=self.differences;u=1-t
+        return 3*(u*u*d0+2*u*t*d1+t*t*d2)
 
     def interior(self,t):
         return 1e-7<t<1-1e-7
@@ -93,17 +98,18 @@ class Context:
             _,index,fraction=self.index.nearest(z)
             t=self.parameter_at(index,fraction)
             return cubic(self.p,t),t
-        if all(v==self.p[0] for v in self.p):return self.p[0],0.0
+        if self.constant:return self.p[0],0.0
         best,index,part=self.index.nearest(z)
         # Refine the closest polyline location on the original cubic itself.
         a=self.times[max(0,index-1)];b=self.times[min(len(self.times)-1,index+2)]
         t=self.times[index]+part*(self.times[index+1]-self.times[index])
         p=self.p;converged=False;previous=None
+        d0,d1,d2,e0,e1=self.differences
         for _ in range(5):
             u=1-t
             pos=cubic(p,t)
-            der=3*(u*u*(p[1]-p[0])+2*u*t*(p[2]-p[1])+t*t*(p[3]-p[2]))
-            second=6*(u*(p[2]-2*p[1]+p[0])+t*(p[3]-2*p[2]+p[1]))
+            der=3*(u*u*d0+2*u*t*d1+t*t*d2)
+            second=6*(u*e0+t*e1)
             denominator=dot(der,der)+dot(pos-z,second)
             if denominator<=1e-15:break
             proposed=max(a,min(b,t-dot(pos-z,der)/denominator))
@@ -116,15 +122,17 @@ class Context:
         if not converged:
             # Keep every old candidate. Add all stationary parameters if the
             # local Newton solve fails, including nonpositive denominators.
-            coefficients=(p[0]-z,3*(p[1]-p[0]),3*(p[2]-2*p[1]+p[0]),
-                          p[3]-3*p[2]+3*p[1]-p[0])
+            coefficients=(p[0]-z,)+self.power_coefficients[1:]
             derivative=[i*v for i,v in enumerate(coefficients) if i]
             stationary=[0.0]*6
             for i,v in enumerate(coefficients):
                 for j,w in enumerate(derivative):stationary[i+j]+=dot(v,w)
             candidates.extend(polynomial_roots_interval(stationary))
-        t=min(candidates,key=lambda v:abs(cubic(p,v)-z))
-        return cubic(p,t),t
+        t=candidates[0];point=cubic(p,t);distance=abs(point-z)
+        for value in candidates[1:]:
+            candidate=cubic(p,value);measured=abs(candidate-z)
+            if measured<distance:distance,point,t=measured,candidate,value
+        return point,t
 
 
 def unpack(p,x):
@@ -162,8 +170,27 @@ def basis(s,segment,count):
     return [v for w in weights for v in (complex(w,0),complex(0,w))]
 
 
+class PreparedParts(list):
+    """Quadratic control-hull bounds shared by all forward objective queries."""
+    def __init__(self,parts):
+        super().__init__(parts)
+        self.boxes=[(min(z.real for z in q),max(z.real for z in q),
+                     min(z.imag for z in q),max(z.imag for z in q)) for q in self]
+        self.margin=max([1.0]+[abs(z) for q in self for z in q])*1e-12
+
+
 def forward_projection(z,parts):
-    return min((nearest_quadratic(z,q)+(i,) for i,q in enumerate(parts)),key=lambda v:v[0])
+    if len(parts)==1:return nearest_quadratic(z,parts[0])+(0,)
+    if not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
+    ranked=sorted((math.hypot(max(b[0]-z.real,0,z.real-b[1]),
+                              max(b[2]-z.imag,0,z.imag-b[3])),i)
+                  for i,b in enumerate(parts.boxes))
+    margin=max(parts.margin,abs(z)*1e-12);best=None
+    for bound,i in ranked:
+        if best is not None and bound-margin>best[0]:break
+        distance,t=nearest_quadratic(z,parts[i])
+        if best is None or (distance,i)<(best[0],best[2]):best=distance,t,i
+    return best
 
 
 def reverse_projections(parts,context,reverse_count):
@@ -181,6 +208,7 @@ def reverse_projections(parts,context,reverse_count):
 def sample_rows(parts,context,reverse_count=None):
     """Residual/Jacobian rows with balanced, arc-length-aware weights."""
     reverse_count=reverse_count or context.reverse_count
+    if len(parts)>1 and not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
     count=len(parts);rows=[];norms=[]
     for z,weight in context.samples:
         distance,s,i=forward_projection(z,parts);q=parts[i]
@@ -213,6 +241,7 @@ def sample_rows(parts,context,reverse_count=None):
 def sample_norms(parts,context,reverse_count=None):
     """Identical distance weights to sample_rows; omit unused Jacobians."""
     reverse_count=reverse_count or context.reverse_count
+    if len(parts)>1 and not isinstance(parts,PreparedParts):parts=PreparedParts(parts)
     norms=[]
     for z,weight in context.samples:
         distance=forward_projection(z,parts)[0]

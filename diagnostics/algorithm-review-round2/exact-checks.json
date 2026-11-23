@@ -1,0 +1,11 @@
+{
+  "reference_commit": "e6794956e3d6d9f0bc18ededba47bddebaba29dd",
+  "checks": {
+    "root_lists_exact": 50004,
+    "quadratic_queries_exact": 10000,
+    "source_queries_exact": 1200,
+    "source_sample_batches_exact": 12,
+    "flattened_points_and_bounds_exact": 300
+  },
+  "all_exact": true
+}
