@@ -5,6 +5,7 @@ No endpoint tangent constraints. Coordinates are normalized before search.
 """
 import math
 from segment_index import SegmentIndex
+from roots_unit import polynomial_roots_interval
 from quad_fit import (dot,cubic,quadratic,split,single_l2,pair_l2,pair_basis,
                       solve,diagnostics)
 from geometry_fit import (point_segment,nearest_quadratic,flatten,arc_samples,
@@ -43,6 +44,10 @@ class Context:
         else:
             self.line,self.times,self.index=geometry
         self.geometry=(self.line,self.times,self.index)
+        chord=p[3]-p[0];length2=dot(chord,chord)
+        self.straight=bool(length2 and all(
+            (z-p[0]).real*chord.imag==(z-p[0]).imag*chord.real and
+            0<=dot(z-p[0],chord)<=length2 for z in p[1:3]))
         lengths=[abs(b-a) for a,b in zip(self.line,self.line[1:])]
         self.samples=[];total=sum(lengths);edge=0;before=0.0
         for i in range(count):
@@ -50,9 +55,31 @@ class Context:
             while edge<len(lengths)-1 and before+lengths[edge]<target:
                 before+=lengths[edge];edge+=1
             local=(target-before)/lengths[edge] if lengths[edge] else 0.0
-            t=self.times[edge]+local*(self.times[edge+1]-self.times[edge])
+            t=self.parameter_at(edge,local)
             weight=.5 if i==0 or i==count-1 else 1.0
             self.samples.append((cubic(p,t),weight/(count-1)))
+
+    def parameter_at(self,edge,fraction):
+        """Invert chord position, rather than assuming uniform parameter speed."""
+        lo=self.times[edge];hi=self.times[edge+1]
+        if fraction<=0:return lo
+        if fraction>=1:return hi
+        chord=self.line[edge+1]-self.line[edge]
+        if not abs(chord):return lo+(hi-lo)*fraction
+        target=self.line[edge]+fraction*chord
+        t=lo+(hi-lo)*fraction
+        for _ in range(64):
+            f=dot(cubic(self.p,t)-target,chord)
+            if f==0:return t
+            if f<0:lo=t
+            else:hi=t
+            derivative=dot(self.tangent(t),chord)
+            proposed=t-f/derivative if derivative>0 else float('inf')
+            if lo<proposed<hi and abs(proposed-t)<2e-14:return proposed
+            proposed=proposed if lo<proposed<hi else (lo+hi)/2
+            if proposed==t:return t
+            t=proposed
+        return t
 
     def tangent(self,t):
         p=self.p;u=1-t
@@ -62,11 +89,16 @@ class Context:
         return 1e-7<t<1-1e-7
 
     def nearest(self,z):
+        if self.straight:
+            _,index,fraction=self.index.nearest(z)
+            t=self.parameter_at(index,fraction)
+            return cubic(self.p,t),t
+        if all(v==self.p[0] for v in self.p):return self.p[0],0.0
         best,index,part=self.index.nearest(z)
         # Refine the closest polyline location on the original cubic itself.
         a=self.times[max(0,index-1)];b=self.times[min(len(self.times)-1,index+2)]
         t=self.times[index]+part*(self.times[index+1]-self.times[index])
-        p=self.p
+        p=self.p;converged=False;previous=None
         for _ in range(5):
             u=1-t
             pos=cubic(p,t)
@@ -75,9 +107,22 @@ class Context:
             denominator=dot(der,der)+dot(pos-z,second)
             if denominator<=1e-15:break
             proposed=max(a,min(b,t-dot(pos-z,der)/denominator))
-            if abs(proposed-t)<1e-10:break
+            if abs(proposed-t)<1e-10:
+                converged=(a<proposed<b or proposed in (0.0,1.0))
+                previous=t;t=proposed;break
             t=proposed
         candidates=[0.0,1.0,t,self.times[index]+part*(self.times[index+1]-self.times[index])]
+        if previous is not None:candidates.append(previous)
+        if not converged:
+            # Keep every old candidate. Add all stationary parameters if the
+            # local Newton solve fails, including nonpositive denominators.
+            coefficients=(p[0]-z,3*(p[1]-p[0]),3*(p[2]-2*p[1]+p[0]),
+                          p[3]-3*p[2]+3*p[1]-p[0])
+            derivative=[i*v for i,v in enumerate(coefficients) if i]
+            stationary=[0.0]*6
+            for i,v in enumerate(coefficients):
+                for j,w in enumerate(derivative):stationary[i+j]+=dot(v,w)
+            candidates.extend(polynomial_roots_interval(stationary))
         t=min(candidates,key=lambda v:abs(cubic(p,v)-z))
         return cubic(p,t),t
 

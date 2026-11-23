@@ -52,6 +52,17 @@ def lattice_ray(z,ray,step):
     if not candidates:raise TangentConflict()
     return min(candidates,key=lambda p:(abs(p-z),abs(cross2(p-a,unit)),p.real,p.imag))
 
+def parallel_ray_interval(tangents):
+    """Common one-dimensional domain of parallel endpoint rays."""
+    (a,u),(b,v)=tangents
+    if abs(cross2(b-a,u))>1e-8*max(1.0,abs(u)):raise TangentConflict()
+    unit=u/abs(u);low=1e-10;bound=dot(b-a,unit)
+    if dot(u,v)<0:high=math.nextafter(bound-1e-10,-float('inf'))
+    else:low=max(low,bound+1e-10);high=float('inf')
+    low=math.nextafter(low,float('inf'))
+    if low>high:raise TangentConflict()
+    return a,unit,low,high
+
 def project_controls(controls,tangents=None,step=0.0):
     if not tangents or not any(tangents):return list(controls)
     if any(ray is not None and not abs(ray[1]) for ray in tangents):raise TangentConflict()
@@ -75,11 +86,7 @@ def project_controls(controls,tangents=None,step=0.0):
             z=a+u*(cross2(b-a,v)/den)
             if not on_ray(z,left) or not on_ray(z,right):raise TangentConflict()
             return [z]
-        if abs(cross2(b-a,u))>1e-8*max(1.0,abs(u)):raise TangentConflict()
-        unit=u/abs(u);low=1e-10;bound=dot(b-a,unit)
-        if dot(u,v)<0:high=bound-1e-10
-        else:low=max(low,bound+1e-10);high=float('inf')
-        if low>high:raise TangentConflict()
+        a,unit,low,high=parallel_ray_interval(tangents)
         z=a+unit*max(low,min(high,dot(result[0]-a,unit)))
         if not on_ray(z,right):raise TangentConflict()
         return [z]
@@ -99,14 +106,22 @@ def unique_tangent_control(tangents):
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
     controls=project_controls(controls,tangents)
-    if len(controls)==1 and all(tangents):return controls
+    overlap=None
+    if len(controls)==1 and all(tangents):
+        if unique_tangent_control(tangents) is not None:return controls
+        overlap=parallel_ray_interval(tangents)
     rays={i:r for i,r in ((0,tangents[0]),(len(controls)-1,tangents[1])) if r is not None}
     initial=[]
     for i,z in enumerate(controls):
-        if i in rays:
+        if overlap is not None:
+            a,unit,low,high=overlap;initial.append(dot(z-a,unit)/scale)
+        elif i in rays:
             a,d=rays[i];initial.append(dot(z-a,d/abs(d))/scale)
         else:initial.extend(((z-origin).real/scale,(z-origin).imag/scale))
     def decode(values):
+        if overlap is not None:
+            a,unit,low,high=overlap
+            return [a+unit*max(low,min(high,values[0]*scale))]
         result=[];k=0
         for i in range(len(controls)):
             if i in rays:

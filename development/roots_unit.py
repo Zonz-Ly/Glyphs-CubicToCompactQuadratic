@@ -3,6 +3,41 @@
 import math
 
 
+def polynomial_roots_interval(coeff):
+    """Isolate real stationary roots on [0,1] for cubic-distance fallback.
+
+    Derivative roots partition the polynomial into monotone intervals. This
+    degree-five fallback supplements failed cubic projection refinement; the
+    existing degree-three quadratic projection solver below is unchanged.
+    """
+    coeff=list(coeff)
+    while len(coeff)>1 and coeff[-1]==0:coeff.pop()
+    scale=max(map(abs,coeff))
+    if not scale or len(coeff)==1:return []
+    coeff=[v/scale for v in coeff]
+    if len(coeff)==2:
+        t=-coeff[0]/coeff[1]
+        return [t] if 0<=t<=1 else []
+    def value(t):
+        result=coeff[-1]
+        for c in reversed(coeff[:-1]):result=result*t+c
+        return result
+    critical=polynomial_roots_interval([i*c for i,c in enumerate(coeff) if i])
+    knots=sorted(set([0.0,1.0]+critical));values=[value(t) for t in knots]
+    roots=[t for t,v in zip(knots,values) if abs(v)<1e-13]
+    for lo,hi,flo,fhi in zip(knots,knots[1:],values,values[1:]):
+        if flo*fhi>=0:continue
+        for _ in range(64):
+            t=(lo+hi)/2
+            if t==lo or t==hi:break
+            f=value(t)
+            if f==0:lo=hi=t;break
+            if flo*f<=0:hi=t
+            else:lo=t;flo=f
+        roots.append((lo+hi)/2)
+    return sorted(set(roots))
+
+
 def polynomial_roots_unit(coeff):
     scale=max(map(abs,coeff))
     if not scale:return []

@@ -1,5 +1,7 @@
 # 算法審查處理與驗證
 
+本文件記錄第一輪結束時的版本；最新第二輪修改見 [第二輪紀錄](../algorithm-review-round2/README.md)。
+
 日期：2026-11-23。根據工作區旁的 `CubicToCompactQuadratic_algorithm_review_tests/`，基準為 `4a1fb74c4ce92ad6107dbbd45eb759422ad770d5`。未修改原始審查資料。
 
 ## 本地提交

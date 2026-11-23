@@ -35,7 +35,7 @@ class CompositeContext:
             while edge<len(lengths)-1 and before+lengths[edge]<target:before+=lengths[edge];edge+=1
             local=(target-before)/lengths[edge] if lengths[edge] else 0.0
             piece,j=self.edges[edge];context=self.contexts[piece]
-            t=context.times[j]+local*(context.times[j+1]-context.times[j])
+            t=context.parameter_at(j,local)
             weight=(.5 if i in (0,count-1) else 1.0)/(count-1)
             self.samples.append((cubic(curves[piece],t),weight))
 
@@ -179,14 +179,19 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
                 boundary_tangents=[(pairs[start%length][0],pairs[(start+count-1)%length][1]) for pairs in join_tangents]
             extra=dict(options)
             if boundary_tangents is not None:extra['tangents']=boundary_tangents
-            if count==1:
-                candidates[key]=fit_corresponding([chain[start%length] for chain in chains],single_tolerance,max_controls,cancel,center_tolerance=center_tolerance,comparison_tolerance=tolerance,**extra)
-            else:
-                subset=[tuple(chain[(start+i)%length] for i in range(count)) for chain in chains]
-                smooth=all(smooth_join(a,b,angle_limit) for chain in subset for a,b in zip(chain,chain[1:]))
-                candidates[key]=try_merged_corresponding(subset,tolerance,max_controls,cancel,center_tolerance=center_tolerance,**extra) if smooth else None
+            try:
+                if count==1:
+                    candidates[key]=fit_corresponding([chain[start%length] for chain in chains],single_tolerance,max_controls,cancel,center_tolerance=center_tolerance,comparison_tolerance=tolerance,**extra)
+                else:
+                    subset=[tuple(chain[(start+i)%length] for i in range(count)) for chain in chains]
+                    smooth=all(smooth_join(a,b,angle_limit) for chain in subset for a,b in zip(chain,chain[1:]))
+                    candidates[key]=try_merged_corresponding(subset,tolerance,max_controls,cancel,center_tolerance=center_tolerance,**extra) if smooth else None
+            except TangentConflict:candidates[key]=None
         return candidates[key]
-    if length==1:return [dict(start=0,count=1,fits=candidate(0,1))]
+    if length==1:
+        fits=candidate(0,1)
+        if fits is None:raise TangentConflict()
+        return [dict(start=0,count=1,fits=fits)]
     whole=candidate(0,length)
     if whole is not None:return [dict(start=0,count=length,fits=whole)]
     def partition(rotation):
@@ -197,12 +202,13 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
             choice=None
             for count in range(length-offset,0,-1):
                 fits=candidate(rotation+offset,count)
-                if fits is None:continue
                 tail=best[offset+count]
+                if fits is None or tail is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 cost=(tail[0]+1,max(error,tail[1]))
                 if choice is None or cost<choice:choice=cost
             best[offset]=choice
+        if best[0] is None:return None
         threshold=best[0][1]
         # With the bottleneck fixed, additive block/control costs have optimal
         # substructure. Store only successors and reconstruct the winner once.
@@ -218,7 +224,12 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
                 if costs[offset] is None or cost<costs[offset]:
                     costs[offset]=cost;successors[offset]=count
         return (costs[0][0],threshold,costs[0][1]),rotation,successors
-    _,rotation,successors=min((partition(i) for i in range(length if cyclic else 1)),key=lambda r:r[0])
+    winner=None
+    for rotation in range(length if cyclic else 1):
+        result=partition(rotation)
+        if result is not None and (winner is None or result[0]<winner[0]):winner=result
+    if winner is None:raise TangentConflict()
+    _,rotation,successors=winner
     blocks=[];offset=0
     while offset<length:
         count=successors[offset];start=(rotation+offset)%length

@@ -782,6 +782,41 @@ class IndexedLine(list):
 import math
 
 
+def polynomial_roots_interval(coeff):
+    """Isolate real stationary roots on [0,1] for cubic-distance fallback.
+
+    Derivative roots partition the polynomial into monotone intervals. This
+    degree-five fallback supplements failed cubic projection refinement; the
+    existing degree-three quadratic projection solver below is unchanged.
+    """
+    coeff=list(coeff)
+    while len(coeff)>1 and coeff[-1]==0:coeff.pop()
+    scale=max(map(abs,coeff))
+    if not scale or len(coeff)==1:return []
+    coeff=[v/scale for v in coeff]
+    if len(coeff)==2:
+        t=-coeff[0]/coeff[1]
+        return [t] if 0<=t<=1 else []
+    def value(t):
+        result=coeff[-1]
+        for c in reversed(coeff[:-1]):result=result*t+c
+        return result
+    critical=polynomial_roots_interval([i*c for i,c in enumerate(coeff) if i])
+    knots=sorted(set([0.0,1.0]+critical));values=[value(t) for t in knots]
+    roots=[t for t,v in zip(knots,values) if abs(v)<1e-13]
+    for lo,hi,flo,fhi in zip(knots,knots[1:],values,values[1:]):
+        if flo*fhi>=0:continue
+        for _ in range(64):
+            t=(lo+hi)/2
+            if t==lo or t==hi:break
+            f=value(t)
+            if f==0:lo=hi=t;break
+            if flo*f<=0:hi=t
+            else:lo=t;flo=f
+        roots.append((lo+hi)/2)
+    return sorted(set(roots))
+
+
 def polynomial_roots_unit(coeff):
     scale=max(map(abs,coeff))
     if not scale:return []
@@ -1089,6 +1124,10 @@ class Context:
         else:
             self.line,self.times,self.index=geometry
         self.geometry=(self.line,self.times,self.index)
+        chord=p[3]-p[0];length2=dot(chord,chord)
+        self.straight=bool(length2 and all(
+            (z-p[0]).real*chord.imag==(z-p[0]).imag*chord.real and
+            0<=dot(z-p[0],chord)<=length2 for z in p[1:3]))
         lengths=[abs(b-a) for a,b in zip(self.line,self.line[1:])]
         self.samples=[];total=sum(lengths);edge=0;before=0.0
         for i in range(count):
@@ -1096,9 +1135,31 @@ class Context:
             while edge<len(lengths)-1 and before+lengths[edge]<target:
                 before+=lengths[edge];edge+=1
             local=(target-before)/lengths[edge] if lengths[edge] else 0.0
-            t=self.times[edge]+local*(self.times[edge+1]-self.times[edge])
+            t=self.parameter_at(edge,local)
             weight=.5 if i==0 or i==count-1 else 1.0
             self.samples.append((cubic(p,t),weight/(count-1)))
+
+    def parameter_at(self,edge,fraction):
+        """Invert chord position, rather than assuming uniform parameter speed."""
+        lo=self.times[edge];hi=self.times[edge+1]
+        if fraction<=0:return lo
+        if fraction>=1:return hi
+        chord=self.line[edge+1]-self.line[edge]
+        if not abs(chord):return lo+(hi-lo)*fraction
+        target=self.line[edge]+fraction*chord
+        t=lo+(hi-lo)*fraction
+        for _ in range(64):
+            f=dot(cubic(self.p,t)-target,chord)
+            if f==0:return t
+            if f<0:lo=t
+            else:hi=t
+            derivative=dot(self.tangent(t),chord)
+            proposed=t-f/derivative if derivative>0 else float('inf')
+            if lo<proposed<hi and abs(proposed-t)<2e-14:return proposed
+            proposed=proposed if lo<proposed<hi else (lo+hi)/2
+            if proposed==t:return t
+            t=proposed
+        return t
 
     def tangent(self,t):
         p=self.p;u=1-t
@@ -1108,11 +1169,16 @@ class Context:
         return 1e-7<t<1-1e-7
 
     def nearest(self,z):
+        if self.straight:
+            _,index,fraction=self.index.nearest(z)
+            t=self.parameter_at(index,fraction)
+            return cubic(self.p,t),t
+        if all(v==self.p[0] for v in self.p):return self.p[0],0.0
         best,index,part=self.index.nearest(z)
         # Refine the closest polyline location on the original cubic itself.
         a=self.times[max(0,index-1)];b=self.times[min(len(self.times)-1,index+2)]
         t=self.times[index]+part*(self.times[index+1]-self.times[index])
-        p=self.p
+        p=self.p;converged=False;previous=None
         for _ in range(5):
             u=1-t
             pos=cubic(p,t)
@@ -1121,9 +1187,22 @@ class Context:
             denominator=dot(der,der)+dot(pos-z,second)
             if denominator<=1e-15:break
             proposed=max(a,min(b,t-dot(pos-z,der)/denominator))
-            if abs(proposed-t)<1e-10:break
+            if abs(proposed-t)<1e-10:
+                converged=(a<proposed<b or proposed in (0.0,1.0))
+                previous=t;t=proposed;break
             t=proposed
         candidates=[0.0,1.0,t,self.times[index]+part*(self.times[index+1]-self.times[index])]
+        if previous is not None:candidates.append(previous)
+        if not converged:
+            # Keep every old candidate. Add all stationary parameters if the
+            # local Newton solve fails, including nonpositive denominators.
+            coefficients=(p[0]-z,3*(p[1]-p[0]),3*(p[2]-2*p[1]+p[0]),
+                          p[3]-3*p[2]+3*p[1]-p[0])
+            derivative=[i*v for i,v in enumerate(coefficients) if i]
+            stationary=[0.0]*6
+            for i,v in enumerate(coefficients):
+                for j,w in enumerate(derivative):stationary[i+j]+=dot(v,w)
+            candidates.extend(polynomial_roots_interval(stationary))
         t=min(candidates,key=lambda v:abs(cubic(p,v)-z))
         return cubic(p,t),t
 
@@ -1420,6 +1499,17 @@ def lattice_ray(z,ray,step):
     if not candidates:raise TangentConflict()
     return min(candidates,key=lambda p:(abs(p-z),abs(cross2(p-a,unit)),p.real,p.imag))
 
+def parallel_ray_interval(tangents):
+    """Common one-dimensional domain of parallel endpoint rays."""
+    (a,u),(b,v)=tangents
+    if abs(cross2(b-a,u))>1e-8*max(1.0,abs(u)):raise TangentConflict()
+    unit=u/abs(u);low=1e-10;bound=dot(b-a,unit)
+    if dot(u,v)<0:high=math.nextafter(bound-1e-10,-float('inf'))
+    else:low=max(low,bound+1e-10);high=float('inf')
+    low=math.nextafter(low,float('inf'))
+    if low>high:raise TangentConflict()
+    return a,unit,low,high
+
 def project_controls(controls,tangents=None,step=0.0):
     if not tangents or not any(tangents):return list(controls)
     if any(ray is not None and not abs(ray[1]) for ray in tangents):raise TangentConflict()
@@ -1443,11 +1533,7 @@ def project_controls(controls,tangents=None,step=0.0):
             z=a+u*(cross2(b-a,v)/den)
             if not on_ray(z,left) or not on_ray(z,right):raise TangentConflict()
             return [z]
-        if abs(cross2(b-a,u))>1e-8*max(1.0,abs(u)):raise TangentConflict()
-        unit=u/abs(u);low=1e-10;bound=dot(b-a,unit)
-        if dot(u,v)<0:high=bound-1e-10
-        else:low=max(low,bound+1e-10);high=float('inf')
-        if low>high:raise TangentConflict()
+        a,unit,low,high=parallel_ray_interval(tangents)
         z=a+unit*max(low,min(high,dot(result[0]-a,unit)))
         if not on_ray(z,right):raise TangentConflict()
         return [z]
@@ -1467,14 +1553,22 @@ def unique_tangent_control(tangents):
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
     controls=project_controls(controls,tangents)
-    if len(controls)==1 and all(tangents):return controls
+    overlap=None
+    if len(controls)==1 and all(tangents):
+        if unique_tangent_control(tangents) is not None:return controls
+        overlap=parallel_ray_interval(tangents)
     rays={i:r for i,r in ((0,tangents[0]),(len(controls)-1,tangents[1])) if r is not None}
     initial=[]
     for i,z in enumerate(controls):
-        if i in rays:
+        if overlap is not None:
+            a,unit,low,high=overlap;initial.append(dot(z-a,unit)/scale)
+        elif i in rays:
             a,d=rays[i];initial.append(dot(z-a,d/abs(d))/scale)
         else:initial.extend(((z-origin).real/scale,(z-origin).imag/scale))
     def decode(values):
+        if overlap is not None:
+            a,unit,low,high=overlap
+            return [a+unit*max(low,min(high,values[0]*scale))]
         result=[];k=0
         for i in range(len(controls)):
             if i in rays:
@@ -1772,7 +1866,7 @@ class CompositeContext:
             while edge<len(lengths)-1 and before+lengths[edge]<target:before+=lengths[edge];edge+=1
             local=(target-before)/lengths[edge] if lengths[edge] else 0.0
             piece,j=self.edges[edge];context=self.contexts[piece]
-            t=context.times[j]+local*(context.times[j+1]-context.times[j])
+            t=context.parameter_at(j,local)
             weight=(.5 if i in (0,count-1) else 1.0)/(count-1)
             self.samples.append((cubic(curves[piece],t),weight))
 
@@ -1916,14 +2010,19 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
                 boundary_tangents=[(pairs[start%length][0],pairs[(start+count-1)%length][1]) for pairs in join_tangents]
             extra=dict(options)
             if boundary_tangents is not None:extra['tangents']=boundary_tangents
-            if count==1:
-                candidates[key]=fit_corresponding([chain[start%length] for chain in chains],single_tolerance,max_controls,cancel,center_tolerance=center_tolerance,comparison_tolerance=tolerance,**extra)
-            else:
-                subset=[tuple(chain[(start+i)%length] for i in range(count)) for chain in chains]
-                smooth=all(smooth_join(a,b,angle_limit) for chain in subset for a,b in zip(chain,chain[1:]))
-                candidates[key]=try_merged_corresponding(subset,tolerance,max_controls,cancel,center_tolerance=center_tolerance,**extra) if smooth else None
+            try:
+                if count==1:
+                    candidates[key]=fit_corresponding([chain[start%length] for chain in chains],single_tolerance,max_controls,cancel,center_tolerance=center_tolerance,comparison_tolerance=tolerance,**extra)
+                else:
+                    subset=[tuple(chain[(start+i)%length] for i in range(count)) for chain in chains]
+                    smooth=all(smooth_join(a,b,angle_limit) for chain in subset for a,b in zip(chain,chain[1:]))
+                    candidates[key]=try_merged_corresponding(subset,tolerance,max_controls,cancel,center_tolerance=center_tolerance,**extra) if smooth else None
+            except TangentConflict:candidates[key]=None
         return candidates[key]
-    if length==1:return [dict(start=0,count=1,fits=candidate(0,1))]
+    if length==1:
+        fits=candidate(0,1)
+        if fits is None:raise TangentConflict()
+        return [dict(start=0,count=1,fits=fits)]
     whole=candidate(0,length)
     if whole is not None:return [dict(start=0,count=length,fits=whole)]
     def partition(rotation):
@@ -1934,12 +2033,13 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
             choice=None
             for count in range(length-offset,0,-1):
                 fits=candidate(rotation+offset,count)
-                if fits is None:continue
                 tail=best[offset+count]
+                if fits is None or tail is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 cost=(tail[0]+1,max(error,tail[1]))
                 if choice is None or cost<choice:choice=cost
             best[offset]=choice
+        if best[0] is None:return None
         threshold=best[0][1]
         # With the bottleneck fixed, additive block/control costs have optimal
         # substructure. Store only successors and reconstruct the winner once.
@@ -1955,7 +2055,12 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
                 if costs[offset] is None or cost<costs[offset]:
                     costs[offset]=cost;successors[offset]=count
         return (costs[0][0],threshold,costs[0][1]),rotation,successors
-    _,rotation,successors=min((partition(i) for i in range(length if cyclic else 1)),key=lambda r:r[0])
+    winner=None
+    for rotation in range(length if cyclic else 1):
+        result=partition(rotation)
+        if result is not None and (winner is None or result[0]<winner[0]):winner=result
+    if winner is None:raise TangentConflict()
+    _,rotation,successors=winner
     blocks=[];offset=0
     while offset<length:
         count=successors[offset];start=(rotation+offset)%length

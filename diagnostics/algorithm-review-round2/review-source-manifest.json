@@ -1,0 +1,20 @@
+{
+  "repository": "Zonz-Ly/Glyphs-CubicToCompactQuadratic",
+  "commit": "7d8eb1923d8aac6759013ca6c354181b20ce017e",
+  "git_blob_hashes": {
+    "quad_fit.py": "145a4e24ba20939bf2e35abdd08c7021b5c89f7f",
+    "search_core.py": "032d1a829ecc7a4707fe1bca3778a484eb012f21",
+    "segment_index.py": "1c98ee481440175067a88b86d72ef70cdccbaffd",
+    "chain_fit.py": "7067a9924ba5bd18b05dae8b615714dc9f06aff6",
+    "geometry_fit.py": "323fde9027d003eef882243f386e9c6e623ce16c",
+    "roots_unit.py": "43302e5e24010ce74cd7e8df8f6c725b759bce8c",
+    "options_fit.py": "98c4d65c2bd6def92de651e9751dea1c25d5b07e",
+    "fast_fit.py": "491e2d0699a6fdee82d14d62861d9174445742b3",
+    "preferences.py": "5228e460ed2d5d292615db3e09d7421fed3d5202",
+    "merge_fit.py": "020bf6324bcab460d35bbd2104ba7bc205380191",
+    "tangent_constraints.py": "79e07d23aee68166bd01a6bc6641eda5b399dbee"
+  },
+  "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "non_numeric_stub": "i18n.tr returns its key in the isolated harness; numerical modules above are byte-identical to their Git blobs. No Glyphs adapter or UI was exercised."
+}

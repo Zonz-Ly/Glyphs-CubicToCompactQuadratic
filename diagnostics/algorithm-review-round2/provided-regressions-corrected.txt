@@ -1,0 +1,8 @@
+test_infeasible_singleton_does_not_abort_feasible_partition (__main__.AlgorithmRegressions) ... ok
+test_nearest_point_on_monotone_straight_cubic (__main__.AlgorithmRegressions) ... ok
+test_parallel_overlapping_rays_retain_one_free_parameter (__main__.AlgorithmRegressions) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.364s
+
+OK

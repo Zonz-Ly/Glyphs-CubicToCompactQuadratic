@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "tests": 249,
+  "tests": 263,
   "native_Glyphs": false,
   "defaults": {
     "deviation": 1,
@@ -135,5 +135,17 @@
     "simple_candidate": "Removed at user request: retain full single-control optimization and continuous validation, without tolerance-based early acceptance",
     "long_source_index": "Control-hull AABB tree for 16 or more source curves; short chains retain sorted lower bounds",
     "plugin_source": "1.0 release asset; regenerated engine; native Glyphs not exercised"
+  },
+  "algorithm_review_round2": {
+    "baseline_commit": "7d8eb1923d8aac6759013ca6c354181b20ce017e",
+    "regression_tests": 14,
+    "report": "diagnostics/algorithm-review-round2/README.md",
+    "precision_policy": "Retain full optimization, sampling, iteration budgets, tangent/lattice constraints and continuous acceptance validation; no tolerance-based early acceptance",
+    "correctness": [
+      "Invert cubic parameters for geometric arc samples and straight projections",
+      "Supplement failed source Newton projection with stationary-root isolation while retaining old candidates",
+      "Treat unavailable partition candidates/suffixes/rotations locally",
+      "Optimize parallel overlapping rays over their shared feasible interval"
+    ]
   }
 }
