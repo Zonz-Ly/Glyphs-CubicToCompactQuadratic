@@ -53,16 +53,22 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     if abs(normal[3]-3*normal[2]+3*normal[1]-normal[0])<1e-11:
         one=single_l2(normal)
         count=2 if policy=='pair' else (control_count if policy=='multiple' else 1)
-        if count==1:parts=restore([one])
-        elif count==2:
-            a=(one[0]+one[1])/2;b=(one[1]+one[2])/2;m=(a+b)/2
-            parts=restore([(one[0],a,m),(m,b,one[2])])
-        else:parts=restore(unpack(normal,subdivision_seed(normal,[i/count for i in range(count+1)])))
-        original_parts=parts;parts=prepare(parts)
-        error=(geometric_bounds(p,parts,tolerance,reject_above=tolerance if decision_only else None,
-                               source_cache=source_cache) if parts!=original_parts else (0.0,scale*1e-10)) if check_error else None
-        single_error=error
-        return result(parts,error,'EXACT DEGREE REDUCTION')
+        for count in ((1,2) if policy=='auto' else (count,)):
+            if count==1:parts=restore([one])
+            elif count==2:
+                a=(one[0]+one[1])/2;b=(one[1]+one[2])/2;m=(a+b)/2
+                parts=restore([(one[0],a,m),(m,b,one[2])])
+            else:parts=restore(unpack(normal,subdivision_seed(normal,[i/count for i in range(count+1)])))
+            original_parts=parts
+            try:parts=prepare(parts)
+            except TangentConflict:
+                if policy=='auto' and count==1:continue
+                raise
+            error=(geometric_bounds(p,parts,tolerance,reject_above=tolerance if decision_only else None,
+                                   source_cache=source_cache) if parts!=original_parts else (0.0,scale*1e-10)) if check_error else None
+            if policy!='auto' or count==1:single_error=error
+            if policy=='auto' and count==1 and check_error and error[1]>tolerance:continue
+            return result(parts,error,'EXACT DEGREE REDUCTION')
     if policy not in ('pair','multiple'):
         try:
             control=unique_tangent_control(tangents) if not integer_step else None

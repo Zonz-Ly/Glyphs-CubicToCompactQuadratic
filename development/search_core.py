@@ -259,6 +259,45 @@ def score_norms(norms,power=2):
     return sum(w*d**power for d,w in norms)**(1.0/power)
 
 
+def bounded_score(parts,context,limit,check=None):
+    """Exact full RMS, or None only when a candidate cannot beat limit.
+
+    For integer neighbor comparisons only. Nonnegative partial sums are
+    guarded for roundoff; completed scores retain built-in sum and term order.
+    A rejection is not a score and must never enter the full-score cache.
+    """
+    if check is not None:check()
+    if not math.isfinite(limit):return score_norms(sample_norms(parts,context))
+    if len(parts)>1:parts=PreparedParts(parts)
+    terms=[];expected_terms=len(context.samples)+len(parts)*context.reverse_count
+    def cannot_win():
+        if check is not None:check()
+        partial=sum(terms)**.5
+        guard=4*(expected_terms+4)*2.220446049250313e-16*max(partial,abs(limit),1e-300)
+        return partial>=limit+guard
+    for i,(z,weight) in enumerate(context.samples,1):
+        distance=forward_projection(z,parts)[0]
+        terms.append((weight*.5)*distance**2)
+        if i%8==0 and cannot_win():return None
+    # Reverse weights must be normalized by the complete curve length, even
+    # when a later distance query can be skipped.
+    prepared=[];length=0.0;reverse_count=context.reverse_count
+    for q in parts:
+        for k in range(reverse_count):
+            s=k/(reverse_count-1)
+            position=quadratic(q,s)
+            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
+            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
+            prepared.append((position,weight));length+=weight
+    length=max(length,1e-15)
+    for i,(position,weight) in enumerate(prepared,1):
+        target,t=context.nearest(position)
+        distance=abs(position-target)
+        terms.append((weight/length*.5)*distance**2)
+        if i%4==0 and cannot_win():return None
+    return sum(terms)**.5
+
+
 def normal_equations(rows,dim,power):
     """Assemble the undamped system, visiting only nonzero local derivatives."""
     matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim

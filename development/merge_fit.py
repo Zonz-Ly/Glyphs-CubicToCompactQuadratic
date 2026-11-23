@@ -203,11 +203,13 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         # break suffix ties yet: an earlier block can mask the suffix error.
         best=[None]*(length+1);best[length]=(0,0.0)
         for offset in range(length-1,-1,-1):
+            if cancel is not None and cancel():raise CancelledError()
             choice=None
             for count in range(length-offset,0,-1):
-                fits=candidate(rotation+offset,count)
                 tail=best[offset+count]
-                if fits is None or tail is None:continue
+                if tail is None:continue
+                fits=candidate(rotation+offset,count)
+                if fits is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 cost=(tail[0]+1,max(error,tail[1]))
                 if choice is None or cost<choice:choice=cost
@@ -219,9 +221,12 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         costs=[None]*(length+1);costs[length]=(0,0)
         successors=[None]*length
         for offset in range(length-1,-1,-1):
+            if cancel is not None and cancel():raise CancelledError()
             for count in range(length-offset,0,-1):
-                fits=candidate(rotation+offset,count);tail=costs[offset+count]
-                if fits is None or tail is None:continue
+                tail=costs[offset+count]
+                if tail is None:continue
+                fits=candidate(rotation+offset,count)
+                if fits is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 if error>threshold:continue
                 cost=(tail[0]+1,tail[1]+len(fits[0]['parts']))

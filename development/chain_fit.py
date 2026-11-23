@@ -29,7 +29,8 @@ def least_squares_seed(p,times):
     real=solve(matrix,[z.real for z in rhs]);imag=solve(matrix,[z.imag for z in rhs])
     return [v for a,b in zip(real,imag) for v in (a,b)]
 
-def arc_times(context,count):
+def arc_times(context,count,legacy=False):
+    """Arc-length knots; keep the old mapping only to retain old searches."""
     lengths=[abs(b-a) for a,b in zip(context.line,context.line[1:])]
     cumulative=[0.0]
     for length in lengths:cumulative.append(cumulative[-1]+length)
@@ -39,24 +40,35 @@ def arc_times(context,count):
         target=cumulative[-1]*j/count
         i=min(len(lengths)-1,bisect.bisect_right(cumulative,target)-1)
         local=(target-cumulative[i])/lengths[i] if lengths[i] else 0
-        times.append(context.times[i]+local*(context.times[i+1]-context.times[i]))
+        times.append(context.times[i]+local*(context.times[i+1]-context.times[i]) if legacy
+                     else context.parameter_at(i,local))
     return times+[1.0]
 
 def optimize_chain(p,count,geometry=None):
-    """Three inexpensive seeds; simultaneous control optimization."""
+    """Retain the complete old search and additionally refine corrected arc knots."""
     context=Context(p,count=max(65,12*count+1),reverse_count=17,geometry=geometry)
-    uniform=[i/count for i in range(count+1)];by_arc=arc_times(context,count)
+    uniform=[i/count for i in range(count+1)];by_arc=arc_times(context,count,legacy=True)
     seeds=[subdivision_seed(p,uniform),subdivision_seed(p,by_arc)]
     try:seeds.append(least_squares_seed(p,uniform))
     except ValueError:pass
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted((objective(x),x) for x in seeds)
-    for x in unique_vectors([x for _,x in candidates[:2]]):
+    searched=list(unique_vectors([x for _,x in candidates[:2]]))
+    for x in searched:
         y,score=refine_lm(p,x,context,iterations=14)
         candidates.append((score,y))
     fine=Context(p,count=max(97,16*count+1),reverse_count=25,geometry=context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
     score,best=min(((final(x),x) for x in unique_vectors([x for _,x in candidates])),key=lambda r:r[0])
     improved,value=refine_lm(p,best,fine,iterations=5)
-    if value<score:best=improved
+    if value<score:best=improved;score=value
+    # Adding a new seed before ranking/fine refinement could displace a search
+    # that used to win. Finish the old path first and retain its final result.
+    corrected=subdivision_seed(p,arc_times(context,count))
+    if tuple(corrected) not in {tuple(x) for x in searched}:
+        alternative,value=refine_lm(p,corrected,context,iterations=14)
+        extra_score,extra=min(((final(x),x) for x in unique_vectors([corrected,alternative])),key=lambda r:r[0])
+        improved,value=refine_lm(p,extra,fine,iterations=5)
+        if value<extra_score:extra=improved;extra_score=value
+        if extra_score<score:best=extra
     return unpack(p,best),fine

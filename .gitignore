@@ -2,3 +2,14 @@ __pycache__/
 *.py[cod]
 .DS_Store
 *.zip
+
+# Local review material, measurement tools and verification records.
+/CubicToCompactQuadratic_algorithm_review_tests/
+/CubicToCompactQuadratic_review_*/
+/diagnostics/
+/validation.json
+/development/benchmark_review*.py
+/development/verify_arc_search.py
+/development/verify_bounded_integer.py
+/development/verify_pruning_round3.py
+/development/verify_review_round2.py

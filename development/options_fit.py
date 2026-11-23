@@ -4,7 +4,7 @@ import math
 from concurrent.futures import CancelledError
 from quad_fit import dot
 from geometry_fit import geometric_bounds
-from search_core import sample_norms,score_norms
+from search_core import sample_norms,score_norms,bounded_score
 from tangent_constraints import (TangentConflict,project_controls,optimize_constrained,
                                  primitive_direction,on_ray)
 
@@ -70,14 +70,19 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}
-    def objective(values):
+    bounded_integer=bool(integer_step and not constrained and len(parts)>1)
+    def objective(values,limit=None):
         nonlocal context
         key=tuple(values)
         if key not in memo:
             if context is None:context=context_factory(normal)
             proposed=control_parts(start,end,values,integer_step,explicit)
             normalized=[tuple((z-origin)/scale for z in q) for q in proposed]
-            memo[key]=score_norms(sample_norms(normalized,context))
+            if limit is None:value=score_norms(sample_norms(normalized,context))
+            else:
+                value=bounded_score(normalized,context,limit,check)
+                if value is None:return float('inf')
+            memo[key]=value
         return memo[key]
     controls=[q[1] for q in parts]
     if constrained:
@@ -97,7 +102,7 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
                     candidate=list(controls);candidate[i]=grid_point(candidate[i]+delta,integer_step)
                     try:candidate=project_controls(candidate,tangents,integer_step)
                     except TangentConflict:continue
-                    value=objective(candidate)
+                    value=objective(candidate,best_score-1e-13) if bounded_integer else objective(candidate)
                     if value<best_score-1e-13:best_score=value;best=candidate
                 if best!=controls:controls=best;score=best_score;changed=True
             if not changed:break

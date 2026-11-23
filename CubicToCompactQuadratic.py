@@ -1362,6 +1362,45 @@ def score_norms(norms,power=2):
     return sum(w*d**power for d,w in norms)**(1.0/power)
 
 
+def bounded_score(parts,context,limit,check=None):
+    """Exact full RMS, or None only when a candidate cannot beat limit.
+
+    For integer neighbor comparisons only. Nonnegative partial sums are
+    guarded for roundoff; completed scores retain built-in sum and term order.
+    A rejection is not a score and must never enter the full-score cache.
+    """
+    if check is not None:check()
+    if not math.isfinite(limit):return score_norms(sample_norms(parts,context))
+    if len(parts)>1:parts=PreparedParts(parts)
+    terms=[];expected_terms=len(context.samples)+len(parts)*context.reverse_count
+    def cannot_win():
+        if check is not None:check()
+        partial=sum(terms)**.5
+        guard=4*(expected_terms+4)*2.220446049250313e-16*max(partial,abs(limit),1e-300)
+        return partial>=limit+guard
+    for i,(z,weight) in enumerate(context.samples,1):
+        distance=forward_projection(z,parts)[0]
+        terms.append((weight*.5)*distance**2)
+        if i%8==0 and cannot_win():return None
+    # Reverse weights must be normalized by the complete curve length, even
+    # when a later distance query can be skipped.
+    prepared=[];length=0.0;reverse_count=context.reverse_count
+    for q in parts:
+        for k in range(reverse_count):
+            s=k/(reverse_count-1)
+            position=quadratic(q,s)
+            der=2*((1-s)*(q[1]-q[0])+s*(q[2]-q[1]))
+            weight=abs(der)*(.5 if k==0 or k==reverse_count-1 else 1)/(reverse_count-1)
+            prepared.append((position,weight));length+=weight
+    length=max(length,1e-15)
+    for i,(position,weight) in enumerate(prepared,1):
+        target,t=context.nearest(position)
+        distance=abs(position-target)
+        terms.append((weight/length*.5)*distance**2)
+        if i%4==0 and cannot_win():return None
+    return sum(terms)**.5
+
+
 def normal_equations(rows,dim,power):
     """Assemble the undamped system, visiting only nonzero local derivatives."""
     matrix=[[0.0]*dim for _ in range(dim)];rhs=[0.0]*dim
@@ -1468,7 +1507,8 @@ def least_squares_seed(p,times):
     real=solve(matrix,[z.real for z in rhs]);imag=solve(matrix,[z.imag for z in rhs])
     return [v for a,b in zip(real,imag) for v in (a,b)]
 
-def arc_times(context,count):
+def arc_times(context,count,legacy=False):
+    """Arc-length knots; keep the old mapping only to retain old searches."""
     lengths=[abs(b-a) for a,b in zip(context.line,context.line[1:])]
     cumulative=[0.0]
     for length in lengths:cumulative.append(cumulative[-1]+length)
@@ -1478,26 +1518,37 @@ def arc_times(context,count):
         target=cumulative[-1]*j/count
         i=min(len(lengths)-1,bisect.bisect_right(cumulative,target)-1)
         local=(target-cumulative[i])/lengths[i] if lengths[i] else 0
-        times.append(context.times[i]+local*(context.times[i+1]-context.times[i]))
+        times.append(context.times[i]+local*(context.times[i+1]-context.times[i]) if legacy
+                     else context.parameter_at(i,local))
     return times+[1.0]
 
 def optimize_chain(p,count,geometry=None):
-    """Three inexpensive seeds; simultaneous control optimization."""
+    """Retain the complete old search and additionally refine corrected arc knots."""
     context=Context(p,count=max(65,12*count+1),reverse_count=17,geometry=geometry)
-    uniform=[i/count for i in range(count+1)];by_arc=arc_times(context,count)
+    uniform=[i/count for i in range(count+1)];by_arc=arc_times(context,count,legacy=True)
     seeds=[subdivision_seed(p,uniform),subdivision_seed(p,by_arc)]
     try:seeds.append(least_squares_seed(p,uniform))
     except ValueError:pass
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted((objective(x),x) for x in seeds)
-    for x in unique_vectors([x for _,x in candidates[:2]]):
+    searched=list(unique_vectors([x for _,x in candidates[:2]]))
+    for x in searched:
         y,score=refine_lm(p,x,context,iterations=14)
         candidates.append((score,y))
     fine=Context(p,count=max(97,16*count+1),reverse_count=25,geometry=context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
     score,best=min(((final(x),x) for x in unique_vectors([x for _,x in candidates])),key=lambda r:r[0])
     improved,value=refine_lm(p,best,fine,iterations=5)
-    if value<score:best=improved
+    if value<score:best=improved;score=value
+    # Adding a new seed before ranking/fine refinement could displace a search
+    # that used to win. Finish the old path first and retain its final result.
+    corrected=subdivision_seed(p,arc_times(context,count))
+    if tuple(corrected) not in {tuple(x) for x in searched}:
+        alternative,value=refine_lm(p,corrected,context,iterations=14)
+        extra_score,extra=min(((final(x),x) for x in unique_vectors([corrected,alternative])),key=lambda r:r[0])
+        improved,value=refine_lm(p,extra,fine,iterations=5)
+        if value<extra_score:extra=improved;extra_score=value
+        if extra_score<score:best=extra
     return unpack(p,best),fine
 
 # -*- coding: utf-8 -*-
@@ -1600,7 +1651,9 @@ def unique_tangent_control(tangents):
     if not tangents or not all(tangents):return None
     (a,u),(b,v)=tangents
     if not abs(u) or not abs(v):raise TangentConflict()
-    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):return None
+    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):
+        parallel_ray_interval(tangents)
+        return None
     return project_controls([a],tangents)[0]
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
@@ -1702,14 +1755,19 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}
-    def objective(values):
+    bounded_integer=bool(integer_step and not constrained and len(parts)>1)
+    def objective(values,limit=None):
         nonlocal context
         key=tuple(values)
         if key not in memo:
             if context is None:context=context_factory(normal)
             proposed=control_parts(start,end,values,integer_step,explicit)
             normalized=[tuple((z-origin)/scale for z in q) for q in proposed]
-            memo[key]=score_norms(sample_norms(normalized,context))
+            if limit is None:value=score_norms(sample_norms(normalized,context))
+            else:
+                value=bounded_score(normalized,context,limit,check)
+                if value is None:return float('inf')
+            memo[key]=value
         return memo[key]
     controls=[q[1] for q in parts]
     if constrained:
@@ -1729,7 +1787,7 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
                     candidate=list(controls);candidate[i]=grid_point(candidate[i]+delta,integer_step)
                     try:candidate=project_controls(candidate,tangents,integer_step)
                     except TangentConflict:continue
-                    value=objective(candidate)
+                    value=objective(candidate,best_score-1e-13) if bounded_integer else objective(candidate)
                     if value<best_score-1e-13:best_score=value;best=candidate
                 if best!=controls:controls=best;score=best_score;changed=True
             if not changed:break
@@ -1783,16 +1841,22 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     if abs(normal[3]-3*normal[2]+3*normal[1]-normal[0])<1e-11:
         one=single_l2(normal)
         count=2 if policy=='pair' else (control_count if policy=='multiple' else 1)
-        if count==1:parts=restore([one])
-        elif count==2:
-            a=(one[0]+one[1])/2;b=(one[1]+one[2])/2;m=(a+b)/2
-            parts=restore([(one[0],a,m),(m,b,one[2])])
-        else:parts=restore(unpack(normal,subdivision_seed(normal,[i/count for i in range(count+1)])))
-        original_parts=parts;parts=prepare(parts)
-        error=(geometric_bounds(p,parts,tolerance,reject_above=tolerance if decision_only else None,
-                               source_cache=source_cache) if parts!=original_parts else (0.0,scale*1e-10)) if check_error else None
-        single_error=error
-        return result(parts,error,'EXACT DEGREE REDUCTION')
+        for count in ((1,2) if policy=='auto' else (count,)):
+            if count==1:parts=restore([one])
+            elif count==2:
+                a=(one[0]+one[1])/2;b=(one[1]+one[2])/2;m=(a+b)/2
+                parts=restore([(one[0],a,m),(m,b,one[2])])
+            else:parts=restore(unpack(normal,subdivision_seed(normal,[i/count for i in range(count+1)])))
+            original_parts=parts
+            try:parts=prepare(parts)
+            except TangentConflict:
+                if policy=='auto' and count==1:continue
+                raise
+            error=(geometric_bounds(p,parts,tolerance,reject_above=tolerance if decision_only else None,
+                                   source_cache=source_cache) if parts!=original_parts else (0.0,scale*1e-10)) if check_error else None
+            if policy!='auto' or count==1:single_error=error
+            if policy=='auto' and count==1 and check_error and error[1]>tolerance:continue
+            return result(parts,error,'EXACT DEGREE REDUCTION')
     if policy not in ('pair','multiple'):
         try:
             control=unique_tangent_control(tangents) if not integer_step else None
@@ -2090,11 +2154,13 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         # break suffix ties yet: an earlier block can mask the suffix error.
         best=[None]*(length+1);best[length]=(0,0.0)
         for offset in range(length-1,-1,-1):
+            if cancel is not None and cancel():raise CancelledError()
             choice=None
             for count in range(length-offset,0,-1):
-                fits=candidate(rotation+offset,count)
                 tail=best[offset+count]
-                if fits is None or tail is None:continue
+                if tail is None:continue
+                fits=candidate(rotation+offset,count)
+                if fits is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 cost=(tail[0]+1,max(error,tail[1]))
                 if choice is None or cost<choice:choice=cost
@@ -2106,9 +2172,12 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         costs=[None]*(length+1);costs[length]=(0,0)
         successors=[None]*length
         for offset in range(length-1,-1,-1):
+            if cancel is not None and cancel():raise CancelledError()
             for count in range(length-offset,0,-1):
-                fits=candidate(rotation+offset,count);tail=costs[offset+count]
-                if fits is None or tail is None:continue
+                tail=costs[offset+count]
+                if tail is None:continue
+                fits=candidate(rotation+offset,count)
+                if fits is None:continue
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
                 if error>threshold:continue
                 cost=(tail[0]+1,tail[1]+len(fits[0]['parts']))

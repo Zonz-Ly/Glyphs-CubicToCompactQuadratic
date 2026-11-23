@@ -101,7 +101,9 @@ def unique_tangent_control(tangents):
     if not tangents or not all(tangents):return None
     (a,u),(b,v)=tangents
     if not abs(u) or not abs(v):raise TangentConflict()
-    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):return None
+    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):
+        parallel_ray_interval(tangents)
+        return None
     return project_controls([a],tangents)[0]
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
