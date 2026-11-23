@@ -54,6 +54,7 @@ def lattice_ray(z,ray,step):
 
 def project_controls(controls,tangents=None,step=0.0):
     if not tangents or not any(tangents):return list(controls)
+    if any(ray is not None and not abs(ray[1]) for ray in tangents):raise TangentConflict()
     result=list(controls);left,right=tangents
     if step:
         if len(result)==1 and left is not None and right is not None:
@@ -87,6 +88,14 @@ def project_controls(controls,tangents=None,step=0.0):
         a,d=ray;unit=d/abs(d)
         result[index]=a+unit*max(1e-9,dot(result[index]-a,unit))
     return result
+
+def unique_tangent_control(tangents):
+    """Return the unique floating control, or None when search is still needed."""
+    if not tangents or not all(tangents):return None
+    (a,u),(b,v)=tangents
+    if not abs(u) or not abs(v):raise TangentConflict()
+    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):return None
+    return project_controls([a],tangents)[0]
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
     controls=project_controls(controls,tangents)

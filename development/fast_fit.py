@@ -5,11 +5,11 @@ from concurrent.futures import CancelledError
 from quad_fit import single_l2,diagnostics
 from geometry_fit import make_context,optimize_one,geometric_bounds,nelder_mead
 from search_core import (Context,pack,unpack,pair_seeds,choose_diverse,sample_norms,
-                         score_norms,refine_lm,numeric_cache)
+                         score_norms,refine_lm,numeric_cache,unique_vectors)
 from chain_fit import optimize_chain,subdivision_seed
 from preferences import validated_settings
 from options_fit import adjust_parts,center_parts
-from tangent_constraints import TangentConflict
+from tangent_constraints import TangentConflict,unique_tangent_control
 
 def optimize_pair(p,geometry=None):
     context=Context(p,count=33,reverse_count=17,geometry=geometry)
@@ -24,14 +24,14 @@ def optimize_pair(p,geometry=None):
     if after<score:score,x=after,y
     fine=Context(p,count=65,reverse_count=25,
                  geometry=context.geometry)
-    choices=[x]+[v for _,v in results]
+    choices=unique_vectors([x]+[v for _,v in results])
     final=lambda v:score_norms(sample_norms(unpack(p,v),fine),2)
     score,x=min(((final(x),x) for x in choices),key=lambda r:r[0])
     y,value=refine_lm(p,x,fine,iterations=5)
     if value<score:x=y
     return unpack(p,x),fine
 
-def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None):
+def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,source_cache=None):
     """Fixed-count policies are internal; auto retains the established one/two fit."""
     if policy not in ('single','auto','pair','probe','multiple'):raise ValueError('Unknown policy')
     values=validated_settings(deviation=tolerance,max_controls=control_count)
@@ -41,7 +41,7 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     origin=p[0];scale=max([abs(z-origin) for z in p]+[1e-9])
     normal=tuple((z-origin)/scale for z in p)
     restore=lambda parts:[tuple(origin+scale*z for z in q) for q in parts]
-    cache=numeric_cache();source_cache={};context=None;single_error=None
+    cache=numeric_cache();source_cache={} if source_cache is None else source_cache;context=None;single_error=None
     while len(cache)>64:cache.pop(next(iter(cache)))
     def prepare(parts):
         return adjust_parts([p],parts,tolerance,center_limit,integer_step,explicit_midpoint,
@@ -64,15 +64,23 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
         single_error=error
         return result(parts,error,'EXACT DEGREE REDUCTION')
     if policy not in ('pair','multiple'):
-        key=('one',normal)
-        if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
-        one=cache[key];parts=prepare(restore([one]))
-        single_error=geometric_bounds(p,parts,tolerance,
-            reject_above=tolerance if decision_only or policy in ('auto','probe') else None,
-            source_cache=source_cache) if check_error else None
-        if policy in ('single','probe') or not check_error or single_error[1]<=tolerance:
-            norms=sample_norms([tuple((z-origin)/scale for z in q) for q in parts],Context(normal)) if metrics else None
-            return result(parts,single_error,'ONE QUADRATIC',norms)
+        try:
+            control=unique_tangent_control(tangents) if not integer_step else None
+            if control is None:
+                key=('one',normal)
+                if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
+                parts=restore([cache[key]])
+            else:parts=[(p[0],control,p[3])]
+            parts=prepare(parts)
+        except TangentConflict:
+            if policy!='auto':raise
+        else:
+            single_error=geometric_bounds(p,parts,tolerance,
+                reject_above=tolerance if decision_only or policy in ('auto','probe') else None,
+                source_cache=source_cache) if check_error else None
+            if policy in ('single','probe') or not check_error or single_error[1]<=tolerance:
+                norms=sample_norms([tuple((z-origin)/scale for z in q) for q in parts],Context(normal)) if metrics else None
+                return result(parts,single_error,'ONE QUADRATIC',norms)
     count=control_count if policy=='multiple' else 2
     key=('chain',normal,count)
     if key not in cache:
@@ -114,6 +122,7 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
     """Find a passing count or the cap, then prefer a simpler fit within the margin."""
     values=validated_settings(deviation=tolerance,max_controls=max_controls)
     tolerance=values['deviation'];max_controls=values['max_controls'];curves=list(curves)
+    source_caches=[{} for _ in curves]
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     comparison_tolerance=tolerance if comparison_tolerance is None else validated_settings(comparison_tolerance)['deviation']
     options=dict(integer_step=integer_step,explicit_midpoint=explicit_midpoint,cancel=cancel) if integer_step else {}
@@ -128,13 +137,13 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
                                    tangents[i] if tangents is not None else None,cancel)
                 if parts!=r['parts']:
                     r['parts']=parts;r['angles']=diagnostics(p,parts)
-                    r['error']=geometric_bounds(p,parts,center_tolerance);r['within']=r['error'][1]<=center_tolerance
+                    r['error']=geometric_bounds(p,parts,center_tolerance,source_cache=source_caches[i]);r['within']=r['error'][1]<=center_tolerance
         return results
     def compute(p,count,check_error,index):
         check_cancel();extra=dict(options)
         if tangents is not None:extra['tangents']=tangents[index]
         try:return fit(p,policy='single' if count==1 else ('pair' if count==2 else 'multiple'),
-                   tolerance=tolerance,control_count=count,check_error=check_error,decision_only=True,**extra)
+                   tolerance=tolerance,control_count=count,check_error=check_error,decision_only=True,source_cache=source_caches[index],**extra)
         except TangentConflict:return None
     if not curves:return []
     if max_controls==1:return finish([compute(p,1,False,i) for i,p in enumerate(curves)])
@@ -146,7 +155,6 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
             if not at_limit and (r is None or not r['within']):break
         candidates.append(results)
         if not at_limit and len(results)==len(curves) and all(r is not None and r['within'] for r in results):break
-    source_caches=[{} for _ in curves]
     def measure(i,r,limit):
         if r['error'] is None or not r['within']:
             r['error']=geometric_bounds(curves[i],r['parts'],tolerance,

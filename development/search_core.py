@@ -92,6 +92,15 @@ def pack(parts):
     return [v for q in parts for v in (q[1].real,q[1].imag)]
 
 
+def unique_vectors(values):
+    """Preserve first occurrence and tie order; accept mutable search vectors."""
+    seen=set()
+    for value in values:
+        key=tuple(value)
+        if key not in seen:
+            seen.add(key);yield value
+
+
 def basis(s,segment,count):
     if count==1:
         value=2*s*(1-s)

@@ -4,7 +4,7 @@ import math
 from concurrent.futures import CancelledError
 from quad_fit import cubic,quadratic,single_l2,solve,diagnostics,intersection
 from geometry_fit import geometric_bounds,nelder_mead,nearest_quadratic
-from search_core import Context,basis,pack,unpack,sample_norms,score_norms,refine_lm,numeric_cache
+from search_core import Context,basis,pack,unpack,sample_norms,score_norms,refine_lm,numeric_cache,unique_vectors
 from chain_fit import subdivision_seed
 from fast_fit import fit_corresponding,select_simpler
 from preferences import validated_settings
@@ -44,7 +44,7 @@ class CompositeContext:
         lower=lambda b:math.hypot(max(b[0]-z.real,0,z.real-b[1]),max(b[2]-z.imag,0,z.imag-b[3]))
         ranked=sorted((lower(box),i) for i,box in enumerate(self.boxes));best=None
         for bound,i in ranked:
-            if best is not None and bound-self.box_allowance>best[0]:continue
+            if best is not None and bound-self.box_allowance>best[0]:break
             point,t=self.contexts[i].nearest(z);candidate=(abs(point-z),i,point,t)
             if best is None or candidate[:2]<best[:2]:best=candidate
         return best[2],(best[1],best[3])
@@ -82,7 +82,7 @@ def optimize_composite(curves,count,geometry=None):
     if count==len(curves):seeds.append(pack([single_l2(p) for p in curves]))
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted(((objective(x),x) for x in seeds),key=lambda r:r[0])
-    for _,x in candidates[:2]:
+    for x in unique_vectors([x for _,x in candidates[:2]]):
         y,value=refine_lm(p,x,context,iterations=14);candidates.append((value,y))
     score,x=min(candidates,key=lambda r:r[0])
     if count==1:
@@ -90,7 +90,7 @@ def optimize_composite(curves,count,geometry=None):
         if after<score:x=y
     fine=CompositeContext(curves,max(97,20*len(curves)+1,16*count+1),25,context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
-    score,x=min(((final(v),v) for v in [x]+[y for _,y in candidates]),key=lambda r:r[0])
+    score,x=min(((final(v),v) for v in unique_vectors([x]+[y for _,y in candidates])),key=lambda r:r[0])
     y,value=refine_lm(p,x,fine,iterations=5)
     if value<score:x=y
     return unpack(p,x),fine.geometry

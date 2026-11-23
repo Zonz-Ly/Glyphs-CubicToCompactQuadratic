@@ -69,10 +69,12 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
         if cancel is not None and cancel():raise CancelledError()
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
-    normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=context_factory(normal);memo={}
+    normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}
     def objective(values):
+        nonlocal context
         key=tuple(values)
         if key not in memo:
+            if context is None:context=context_factory(normal)
             proposed=control_parts(start,end,values,integer_step,explicit)
             normalized=[tuple((z-origin)/scale for z in q) for q in proposed]
             memo[key]=score_norms(sample_norms(normalized,context))

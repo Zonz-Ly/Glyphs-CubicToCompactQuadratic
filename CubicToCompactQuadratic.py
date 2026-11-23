@@ -820,6 +820,7 @@ Optimization uses a sampled objective. Acceptance uses bidirectional
 polyline Hausdorff bounds plus certified Bezier flattening bounds.
 """
 import math
+from functools import lru_cache
 import heapq
 
 
@@ -844,7 +845,7 @@ def nearest_polyline(z, line):
     return best,index
 
 
-def flatten(points, tolerance):
+def flatten_points(points, tolerance):
     """Polyline within tolerance in Hausdorff distance (exact arithmetic).
 
     Convex-hull distance to the finite chord bounds curve-to-chord error;
@@ -865,7 +866,12 @@ def flatten(points, tolerance):
         a = tuple(row[0] for row in levels)
         b = tuple(row[-1] for row in reversed(levels))
         stack.append((b,depth+1));stack.append((a,depth+1))
-    return IndexedLine(out),worst
+    return out,worst
+
+
+def flatten(points,tolerance):
+    points,error=flatten_points(points,tolerance)
+    return IndexedLine(points),error
 
 
 def arc_samples(line, count):
@@ -883,9 +889,15 @@ def arc_samples(line, count):
     return result
 
 
+@lru_cache(maxsize=256)
+def quadratic_coefficients(q):
+    b=2*(q[1]-q[0]);c=q[0]-2*q[1]+q[2]
+    return b,c,dot(b,b),3*dot(b,c),2*dot(c,c)
+
+
 def nearest_quadratic(z,q):
-    a=q[0]-z;b=2*(q[1]-q[0]);c=q[0]-2*q[1]+q[2]
-    coeff=(dot(a,b),dot(b,b)+2*dot(a,c),3*dot(b,c),2*dot(c,c))
+    a=q[0]-z;b,c,bb,bc,cc=quadratic_coefficients(tuple(q))
+    coeff=(dot(a,b),bb+2*dot(a,c),bc,cc)
     candidates=[0.0,1.0]+polynomial_roots_unit(coeff)
     t=min(candidates,key=lambda t:abs(a+b*t+c*t*t))
     return abs(a+b*t+c*t*t),t
@@ -908,14 +920,14 @@ def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,sourc
         else:
             points=[];ea=0.0
             for curve in source_curves:
-                line,error=flatten(curve,delta);points.extend(line if not points else line[1:]);ea=max(ea,error)
+                line,error=flatten_points(curve,delta);points.extend(line if not points else line[1:]);ea=max(ea,error)
             original=IndexedLine(points)
         if source_cache is not None:
             if len(source_cache)>=8:source_cache.pop(next(iter(source_cache)))
             source_cache[key]=(original,ea)
     fitted=[];eb=0.0
     for q in parts:
-        line,e=flatten(q,delta)
+        line,e=flatten_points(q,delta)
         fitted.extend(line if not fitted else line[1:]);eb=max(eb,e)
     fitted=IndexedLine(fitted)
     allowance=max([1.0]+list(map(abs,bounds_points))+[abs(v) for q in parts for v in q])*1e-10
@@ -1008,7 +1020,7 @@ def optimize_one(p,context,maximum=True):
     # Pick the best sampled starts; preserve the unmodified candidates too.
     ranked=sorted(seeds,key=lambda z:sampled_objective([(p[0],z,p[3])],context,maximum))
     best=[]
-    for q in ranked[:2]:
+    for q in dict.fromkeys(ranked[:2]):
         objective=lambda xy:sampled_objective([(p[0],complex(*xy),p[3])],context,maximum)
         score,xy=nelder_mead(objective,[q.real,q.imag],iterations=140)
         best.append((score,(p[0],complex(*xy),p[3])))
@@ -1103,6 +1115,15 @@ def unpack(p,x):
 
 def pack(parts):
     return [v for q in parts for v in (q[1].real,q[1].imag)]
+
+
+def unique_vectors(values):
+    """Preserve first occurrence and tie order; accept mutable search vectors."""
+    seen=set()
+    for value in values:
+        key=tuple(value)
+        if key not in seen:
+            seen.add(key);yield value
 
 
 def basis(s,segment,count):
@@ -1306,12 +1327,12 @@ def optimize_chain(p,count,geometry=None):
     except ValueError:pass
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted((objective(x),x) for x in seeds)
-    for _,x in candidates[:2]:
+    for x in unique_vectors([x for _,x in candidates[:2]]):
         y,score=refine_lm(p,x,context,iterations=14)
         candidates.append((score,y))
     fine=Context(p,count=max(97,16*count+1),reverse_count=25,geometry=context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
-    score,best=min(((final(x),x) for _,x in candidates),key=lambda r:r[0])
+    score,best=min(((final(x),x) for x in unique_vectors([x for _,x in candidates])),key=lambda r:r[0])
     improved,value=refine_lm(p,best,fine,iterations=5)
     if value<score:best=improved
     return unpack(p,best),fine
@@ -1369,6 +1390,7 @@ def lattice_ray(z,ray,step):
 
 def project_controls(controls,tangents=None,step=0.0):
     if not tangents or not any(tangents):return list(controls)
+    if any(ray is not None and not abs(ray[1]) for ray in tangents):raise TangentConflict()
     result=list(controls);left,right=tangents
     if step:
         if len(result)==1 and left is not None and right is not None:
@@ -1402,6 +1424,14 @@ def project_controls(controls,tangents=None,step=0.0):
         a,d=ray;unit=d/abs(d)
         result[index]=a+unit*max(1e-9,dot(result[index]-a,unit))
     return result
+
+def unique_tangent_control(tangents):
+    """Return the unique floating control, or None when search is still needed."""
+    if not tangents or not all(tangents):return None
+    (a,u),(b,v)=tangents
+    if not abs(u) or not abs(v):raise TangentConflict()
+    if abs(cross2(u,v))<=1e-12*abs(u)*abs(v):return None
+    return project_controls([a],tangents)[0]
 
 def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
     controls=project_controls(controls,tangents)
@@ -1489,10 +1519,12 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
         if cancel is not None and cancel():raise CancelledError()
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
-    normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=context_factory(normal);memo={}
+    normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}
     def objective(values):
+        nonlocal context
         key=tuple(values)
         if key not in memo:
+            if context is None:context=context_factory(normal)
             proposed=control_parts(start,end,values,integer_step,explicit)
             normalized=[tuple((z-origin)/scale for z in q) for q in proposed]
             memo[key]=score_norms(sample_norms(normalized,context))
@@ -1540,14 +1572,14 @@ def optimize_pair(p,geometry=None):
     if after<score:score,x=after,y
     fine=Context(p,count=65,reverse_count=25,
                  geometry=context.geometry)
-    choices=[x]+[v for _,v in results]
+    choices=unique_vectors([x]+[v for _,v in results])
     final=lambda v:score_norms(sample_norms(unpack(p,v),fine),2)
     score,x=min(((final(x),x) for x in choices),key=lambda r:r[0])
     y,value=refine_lm(p,x,fine,iterations=5)
     if value<score:x=y
     return unpack(p,x),fine
 
-def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None):
+def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,source_cache=None):
     """Fixed-count policies are internal; auto retains the established one/two fit."""
     if policy not in ('single','auto','pair','probe','multiple'):raise ValueError('Unknown policy')
     values=validated_settings(deviation=tolerance,max_controls=control_count)
@@ -1557,7 +1589,7 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     origin=p[0];scale=max([abs(z-origin) for z in p]+[1e-9])
     normal=tuple((z-origin)/scale for z in p)
     restore=lambda parts:[tuple(origin+scale*z for z in q) for q in parts]
-    cache=numeric_cache();source_cache={};context=None;single_error=None
+    cache=numeric_cache();source_cache={} if source_cache is None else source_cache;context=None;single_error=None
     while len(cache)>64:cache.pop(next(iter(cache)))
     def prepare(parts):
         return adjust_parts([p],parts,tolerance,center_limit,integer_step,explicit_midpoint,
@@ -1580,15 +1612,23 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
         single_error=error
         return result(parts,error,'EXACT DEGREE REDUCTION')
     if policy not in ('pair','multiple'):
-        key=('one',normal)
-        if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
-        one=cache[key];parts=prepare(restore([one]))
-        single_error=geometric_bounds(p,parts,tolerance,
-            reject_above=tolerance if decision_only or policy in ('auto','probe') else None,
-            source_cache=source_cache) if check_error else None
-        if policy in ('single','probe') or not check_error or single_error[1]<=tolerance:
-            norms=sample_norms([tuple((z-origin)/scale for z in q) for q in parts],Context(normal)) if metrics else None
-            return result(parts,single_error,'ONE QUADRATIC',norms)
+        try:
+            control=unique_tangent_control(tangents) if not integer_step else None
+            if control is None:
+                key=('one',normal)
+                if key not in cache:cache[key]=optimize_one(normal,make_context(normal),maximum=False)
+                parts=restore([cache[key]])
+            else:parts=[(p[0],control,p[3])]
+            parts=prepare(parts)
+        except TangentConflict:
+            if policy!='auto':raise
+        else:
+            single_error=geometric_bounds(p,parts,tolerance,
+                reject_above=tolerance if decision_only or policy in ('auto','probe') else None,
+                source_cache=source_cache) if check_error else None
+            if policy in ('single','probe') or not check_error or single_error[1]<=tolerance:
+                norms=sample_norms([tuple((z-origin)/scale for z in q) for q in parts],Context(normal)) if metrics else None
+                return result(parts,single_error,'ONE QUADRATIC',norms)
     count=control_count if policy=='multiple' else 2
     key=('chain',normal,count)
     if key not in cache:
@@ -1630,6 +1670,7 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
     """Find a passing count or the cap, then prefer a simpler fit within the margin."""
     values=validated_settings(deviation=tolerance,max_controls=max_controls)
     tolerance=values['deviation'];max_controls=values['max_controls'];curves=list(curves)
+    source_caches=[{} for _ in curves]
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     comparison_tolerance=tolerance if comparison_tolerance is None else validated_settings(comparison_tolerance)['deviation']
     options=dict(integer_step=integer_step,explicit_midpoint=explicit_midpoint,cancel=cancel) if integer_step else {}
@@ -1644,13 +1685,13 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
                                    tangents[i] if tangents is not None else None,cancel)
                 if parts!=r['parts']:
                     r['parts']=parts;r['angles']=diagnostics(p,parts)
-                    r['error']=geometric_bounds(p,parts,center_tolerance);r['within']=r['error'][1]<=center_tolerance
+                    r['error']=geometric_bounds(p,parts,center_tolerance,source_cache=source_caches[i]);r['within']=r['error'][1]<=center_tolerance
         return results
     def compute(p,count,check_error,index):
         check_cancel();extra=dict(options)
         if tangents is not None:extra['tangents']=tangents[index]
         try:return fit(p,policy='single' if count==1 else ('pair' if count==2 else 'multiple'),
-                   tolerance=tolerance,control_count=count,check_error=check_error,decision_only=True,**extra)
+                   tolerance=tolerance,control_count=count,check_error=check_error,decision_only=True,source_cache=source_caches[index],**extra)
         except TangentConflict:return None
     if not curves:return []
     if max_controls==1:return finish([compute(p,1,False,i) for i,p in enumerate(curves)])
@@ -1662,7 +1703,6 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
             if not at_limit and (r is None or not r['within']):break
         candidates.append(results)
         if not at_limit and len(results)==len(curves) and all(r is not None and r['within'] for r in results):break
-    source_caches=[{} for _ in curves]
     def measure(i,r,limit):
         if r['error'] is None or not r['within']:
             r['error']=geometric_bounds(curves[i],r['parts'],tolerance,
@@ -1710,7 +1750,7 @@ class CompositeContext:
         lower=lambda b:math.hypot(max(b[0]-z.real,0,z.real-b[1]),max(b[2]-z.imag,0,z.imag-b[3]))
         ranked=sorted((lower(box),i) for i,box in enumerate(self.boxes));best=None
         for bound,i in ranked:
-            if best is not None and bound-self.box_allowance>best[0]:continue
+            if best is not None and bound-self.box_allowance>best[0]:break
             point,t=self.contexts[i].nearest(z);candidate=(abs(point-z),i,point,t)
             if best is None or candidate[:2]<best[:2]:best=candidate
         return best[2],(best[1],best[3])
@@ -1748,7 +1788,7 @@ def optimize_composite(curves,count,geometry=None):
     if count==len(curves):seeds.append(pack([single_l2(p) for p in curves]))
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted(((objective(x),x) for x in seeds),key=lambda r:r[0])
-    for _,x in candidates[:2]:
+    for x in unique_vectors([x for _,x in candidates[:2]]):
         y,value=refine_lm(p,x,context,iterations=14);candidates.append((value,y))
     score,x=min(candidates,key=lambda r:r[0])
     if count==1:
@@ -1756,7 +1796,7 @@ def optimize_composite(curves,count,geometry=None):
         if after<score:x=y
     fine=CompositeContext(curves,max(97,20*len(curves)+1,16*count+1),25,context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
-    score,x=min(((final(v),v) for v in [x]+[y for _,y in candidates]),key=lambda r:r[0])
+    score,x=min(((final(v),v) for v in unique_vectors([x]+[y for _,y in candidates])),key=lambda r:r[0])
     y,value=refine_lm(p,x,fine,iterations=5)
     if value<score:x=y
     return unpack(p,x),fine.geometry

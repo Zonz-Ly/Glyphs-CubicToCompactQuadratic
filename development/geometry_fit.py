@@ -5,6 +5,7 @@ Optimization uses a sampled objective. Acceptance uses bidirectional
 polyline Hausdorff bounds plus certified Bezier flattening bounds.
 """
 import math
+from functools import lru_cache
 from roots_unit import polynomial_roots_unit
 import heapq
 from segment_index import IndexedLine
@@ -33,7 +34,7 @@ def nearest_polyline(z, line):
     return best,index
 
 
-def flatten(points, tolerance):
+def flatten_points(points, tolerance):
     """Polyline within tolerance in Hausdorff distance (exact arithmetic).
 
     Convex-hull distance to the finite chord bounds curve-to-chord error;
@@ -54,7 +55,12 @@ def flatten(points, tolerance):
         a = tuple(row[0] for row in levels)
         b = tuple(row[-1] for row in reversed(levels))
         stack.append((b,depth+1));stack.append((a,depth+1))
-    return IndexedLine(out),worst
+    return out,worst
+
+
+def flatten(points,tolerance):
+    points,error=flatten_points(points,tolerance)
+    return IndexedLine(points),error
 
 
 def arc_samples(line, count):
@@ -72,9 +78,15 @@ def arc_samples(line, count):
     return result
 
 
+@lru_cache(maxsize=256)
+def quadratic_coefficients(q):
+    b=2*(q[1]-q[0]);c=q[0]-2*q[1]+q[2]
+    return b,c,dot(b,b),3*dot(b,c),2*dot(c,c)
+
+
 def nearest_quadratic(z,q):
-    a=q[0]-z;b=2*(q[1]-q[0]);c=q[0]-2*q[1]+q[2]
-    coeff=(dot(a,b),dot(b,b)+2*dot(a,c),3*dot(b,c),2*dot(c,c))
+    a=q[0]-z;b,c,bb,bc,cc=quadratic_coefficients(tuple(q))
+    coeff=(dot(a,b),bb+2*dot(a,c),bc,cc)
     candidates=[0.0,1.0]+polynomial_roots_unit(coeff)
     t=min(candidates,key=lambda t:abs(a+b*t+c*t*t))
     return abs(a+b*t+c*t*t),t
@@ -97,14 +109,14 @@ def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,sourc
         else:
             points=[];ea=0.0
             for curve in source_curves:
-                line,error=flatten(curve,delta);points.extend(line if not points else line[1:]);ea=max(ea,error)
+                line,error=flatten_points(curve,delta);points.extend(line if not points else line[1:]);ea=max(ea,error)
             original=IndexedLine(points)
         if source_cache is not None:
             if len(source_cache)>=8:source_cache.pop(next(iter(source_cache)))
             source_cache[key]=(original,ea)
     fitted=[];eb=0.0
     for q in parts:
-        line,e=flatten(q,delta)
+        line,e=flatten_points(q,delta)
         fitted.extend(line if not fitted else line[1:]);eb=max(eb,e)
     fitted=IndexedLine(fitted)
     allowance=max([1.0]+list(map(abs,bounds_points))+[abs(v) for q in parts for v in q])*1e-10
@@ -197,7 +209,7 @@ def optimize_one(p,context,maximum=True):
     # Pick the best sampled starts; preserve the unmodified candidates too.
     ranked=sorted(seeds,key=lambda z:sampled_objective([(p[0],z,p[3])],context,maximum))
     best=[]
-    for q in ranked[:2]:
+    for q in dict.fromkeys(ranked[:2]):
         objective=lambda xy:sampled_objective([(p[0],complex(*xy),p[3])],context,maximum)
         score,xy=nelder_mead(objective,[q.real,q.imag],iterations=140)
         best.append((score,(p[0],complex(*xy),p[3])))

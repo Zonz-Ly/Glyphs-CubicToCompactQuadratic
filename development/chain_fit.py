@@ -2,7 +2,7 @@
 """Geometric fitting of quadratic chains with implicit, smooth midpoint joins."""
 import bisect
 from quad_fit import split,single_l2,cubic,solve
-from search_core import Context,pack,unpack,basis,sample_norms,score_norms,refine_lm
+from search_core import Context,pack,unpack,basis,sample_norms,score_norms,refine_lm,unique_vectors
 
 def subdivision_seed(p,times):
     remaining=p;before=0.0;parts=[]
@@ -51,12 +51,12 @@ def optimize_chain(p,count,geometry=None):
     except ValueError:pass
     objective=lambda x:score_norms(sample_norms(unpack(p,x),context))
     candidates=sorted((objective(x),x) for x in seeds)
-    for _,x in candidates[:2]:
+    for x in unique_vectors([x for _,x in candidates[:2]]):
         y,score=refine_lm(p,x,context,iterations=14)
         candidates.append((score,y))
     fine=Context(p,count=max(97,16*count+1),reverse_count=25,geometry=context.geometry)
     final=lambda x:score_norms(sample_norms(unpack(p,x),fine))
-    score,best=min(((final(x),x) for _,x in candidates),key=lambda r:r[0])
+    score,best=min(((final(x),x) for x in unique_vectors([x for _,x in candidates])),key=lambda r:r[0])
     improved,value=refine_lm(p,best,fine,iterations=5)
     if value<score:best=improved
     return unpack(p,best),fine
