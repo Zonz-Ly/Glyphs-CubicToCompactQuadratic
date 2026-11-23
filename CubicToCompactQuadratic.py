@@ -1114,6 +1114,12 @@ def optimize_one(p,context,maximum=True):
 No endpoint tangent constraints. Coordinates are normalized before search.
 """
 import math
+from concurrent.futures import CancelledError
+
+
+def check_cancelled(cancel):
+    """Honor the shared optional predicate at fitting and adjustment boundaries."""
+    if cancel is not None and cancel():raise CancelledError()
 
 
 def numeric_cache():
@@ -1691,7 +1697,6 @@ def optimize_constrained(controls,tangents,origin,scale,objective,cancel):
 # -*- coding: utf-8 -*-
 """Optional tangent/lattice fitting and separately accepted one-control centering."""
 import math
-from concurrent.futures import CancelledError
 
 def grid_point(z,step):return complex(round(z.real/step)*step,round(z.imag/step)*step)
 
@@ -1701,9 +1706,10 @@ def control_parts(start,end,controls,step=0.0,explicit=False):
     return [(joins[i],q,joins[i+1]) for i,q in enumerate(controls)]
 
 def center_parts(curves,parts,tolerance,center_limit,integer_step=0.0,tangents=None,cancel=None):
+    check_cancelled(cancel)
     if not center_limit or len(parts)!=1:return parts
     def check():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     check();start,q,end=parts[0];chord=end-start
     if abs(chord)<1e-12:return parts
     direction=chord/abs(chord);middle=(start+end)/2
@@ -1748,10 +1754,11 @@ def center_parts(curves,parts,tolerance,center_limit,integer_step=0.0,tangents=N
     return parts
 
 def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explicit=False,context_factory=None,cancel=None,tangents=None):
+    check_cancelled(cancel)
     constrained=bool(tangents and any(tangents))
     if not integer_step and not constrained:return center_parts(curves,parts,tolerance,center_limit,cancel=cancel)
     def check():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}
@@ -1797,7 +1804,6 @@ def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explic
 # -*- coding: utf-8 -*-
 """Production geometric fitting; masters share a minimal acceptable control count."""
 import math
-from concurrent.futures import CancelledError
 
 def optimize_pair(p,geometry=None):
     context=Context(p,count=33,reverse_count=17,geometry=geometry)
@@ -1821,6 +1827,7 @@ def optimize_pair(p,geometry=None):
 
 def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,source_cache=None):
     """Fixed-count policies are internal; auto retains the established one/two fit."""
+    check_cancelled(cancel)
     if policy not in ('single','auto','pair','probe','multiple'):raise ValueError('Unknown policy')
     values=validated_settings(deviation=tolerance,max_controls=control_count)
     tolerance=values['deviation'];control_count=values['max_controls']
@@ -1832,9 +1839,11 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     cache=numeric_cache();source_cache={} if source_cache is None else source_cache;context=None;single_error=None
     while len(cache)>64:cache.pop(next(iter(cache)))
     def prepare(parts):
+        check_cancelled(cancel)
         return adjust_parts([p],parts,tolerance,center_limit,integer_step,explicit_midpoint,
                             context_factory=lambda curves:Context(curves[0]),cancel=cancel,tangents=tangents)
     def result(parts,error,status,norms=None):
+        check_cancelled(cancel)
         return dict(parts=parts,error=error,within=error[1]<=tolerance if error is not None else None,
                     angles=diagnostics(p,parts),single_error=single_error,status=status,
                     rms=score_norms(norms)*scale if norms is not None else None,tangents=tangents or (None,None))
@@ -1892,7 +1901,7 @@ def select_simpler(candidates,layers,margin,complete,measure,cancel=None,ceiling
     def worst(count,results,limit=None):
         upper=0.0
         for i in range(layers):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             if i==len(results):results.append(complete(i,count))
             r=results[i]
             if r is None:return float('inf')
@@ -1919,10 +1928,11 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
     source_caches=[{} for _ in curves]
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     comparison_tolerance=tolerance if comparison_tolerance is None else validated_settings(comparison_tolerance)['deviation']
-    options=dict(integer_step=integer_step,explicit_midpoint=explicit_midpoint,cancel=cancel) if integer_step else {}
+    options=dict(cancel=cancel)
+    if integer_step:options.update(integer_step=integer_step,explicit_midpoint=explicit_midpoint)
     if tangents is not None and len(tangents)!=len(curves):raise TangentConflict()
     def check_cancel():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     def finish(results):
         if any(r is None for r in results):raise TangentConflict()
         if center_limit:
@@ -1961,7 +1971,6 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
 # -*- coding: utf-8 -*-
 """Fit adjacent cubic pieces jointly, then partition without losing selected data."""
 import math
-from concurrent.futures import CancelledError
 
 class CompositeContext:
     def __init__(self,curves,count=65,reverse_count=25,geometry=None):
@@ -2062,6 +2071,7 @@ def single_quadratic_bound(curves,q):
     return upper+max([1.0]+[abs(z) for p in curves for z in p]+list(map(abs,q)))*1e-10
 
 def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,center_tolerance=None):
+    check_cancelled(cancel)
     origin=curves[0][0];scale=max([abs(z-origin) for p in curves for z in p]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves)
     control=unique_tangent_control(tangents) if count==1 and not integer_step else None
@@ -2083,12 +2093,13 @@ def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit
     error=(0.0,bound) if bound<=tolerance else geometric_bounds(
         proxy,parts,tolerance,accuracy=min(max(.002,tolerance*.02),tolerance*.1),
         reject_above=tolerance,source_cache=bounds_cache,source_curves=curves)
+    check_cancelled(cancel)
     return dict(parts=parts,error=error,within=error[1]<=tolerance,angles=diagnostics(proxy,parts),tangents=tangents or (None,None))
 
 def try_merged_corresponding(chains,tolerance,max_controls,cancel=None,tangents=None,**options):
     geometries={};bounds_cache={};candidates=[]
     def compute(i,count):
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
         extra=dict(options)
         if tangents is not None:extra['tangents']=tangents[i]
         try:return fit_merged_count(chains[i],count,tolerance,geometries,bounds_cache,cancel=cancel,**extra)
@@ -2126,7 +2137,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     candidates={}
     def candidate(start,count):
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
         key=(start%length,count)
         if key not in candidates:
             boundary_tangents=[(pair[0] if start%length==0 else None,pair[1] if (start+count)%length==0 else None) for pair in tangents] if tangents is not None else None
@@ -2154,7 +2165,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         # break suffix ties yet: an earlier block can mask the suffix error.
         best=[None]*(length+1);best[length]=(0,0.0)
         for offset in range(length-1,-1,-1):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             choice=None
             for count in range(length-offset,0,-1):
                 tail=best[offset+count]
@@ -2172,7 +2183,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         costs=[None]*(length+1);costs[length]=(0,0)
         successors=[None]*length
         for offset in range(length-1,-1,-1):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             for count in range(length-offset,0,-1):
                 tail=costs[offset+count]
                 if tail is None:continue

@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """Fit adjacent cubic pieces jointly, then partition without losing selected data."""
 import math
-from concurrent.futures import CancelledError
 from quad_fit import cubic,quadratic,single_l2,solve,diagnostics,intersection
 from geometry_fit import geometric_bounds,nelder_mead,nearest_quadratic
-from search_core import Context,basis,pack,unpack,sample_norms,score_norms,refine_lm,numeric_cache,unique_vectors
+from search_core import Context,basis,pack,unpack,sample_norms,score_norms,refine_lm,numeric_cache,unique_vectors,check_cancelled
 from chain_fit import subdivision_seed
 from fast_fit import fit_corresponding,select_simpler
 from preferences import validated_settings
@@ -111,6 +110,7 @@ def single_quadratic_bound(curves,q):
     return upper+max([1.0]+[abs(z) for p in curves for z in p]+list(map(abs,q)))*1e-10
 
 def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,center_tolerance=None):
+    check_cancelled(cancel)
     origin=curves[0][0];scale=max([abs(z-origin) for p in curves for z in p]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves)
     control=unique_tangent_control(tangents) if count==1 and not integer_step else None
@@ -132,12 +132,13 @@ def fit_merged_count(curves,count,tolerance,geometries,bounds_cache,center_limit
     error=(0.0,bound) if bound<=tolerance else geometric_bounds(
         proxy,parts,tolerance,accuracy=min(max(.002,tolerance*.02),tolerance*.1),
         reject_above=tolerance,source_cache=bounds_cache,source_curves=curves)
+    check_cancelled(cancel)
     return dict(parts=parts,error=error,within=error[1]<=tolerance,angles=diagnostics(proxy,parts),tangents=tangents or (None,None))
 
 def try_merged_corresponding(chains,tolerance,max_controls,cancel=None,tangents=None,**options):
     geometries={};bounds_cache={};candidates=[]
     def compute(i,count):
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
         extra=dict(options)
         if tangents is not None:extra['tangents']=tangents[i]
         try:return fit_merged_count(chains[i],count,tolerance,geometries,bounds_cache,cancel=cancel,**extra)
@@ -175,7 +176,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     candidates={}
     def candidate(start,count):
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
         key=(start%length,count)
         if key not in candidates:
             boundary_tangents=[(pair[0] if start%length==0 else None,pair[1] if (start+count)%length==0 else None) for pair in tangents] if tangents is not None else None
@@ -203,7 +204,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         # break suffix ties yet: an earlier block can mask the suffix error.
         best=[None]*(length+1);best[length]=(0,0.0)
         for offset in range(length-1,-1,-1):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             choice=None
             for count in range(length-offset,0,-1):
                 tail=best[offset+count]
@@ -221,7 +222,7 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
         costs=[None]*(length+1);costs[length]=(0,0)
         successors=[None]*length
         for offset in range(length-1,-1,-1):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             for count in range(length-offset,0,-1):
                 tail=costs[offset+count]
                 if tail is None:continue

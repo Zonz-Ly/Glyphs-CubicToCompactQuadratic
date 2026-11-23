@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """Optional tangent/lattice fitting and separately accepted one-control centering."""
 import math
-from concurrent.futures import CancelledError
 from quad_fit import dot
 from geometry_fit import geometric_bounds
-from search_core import sample_norms,score_norms,bounded_score
+from search_core import sample_norms,score_norms,bounded_score,check_cancelled
 from tangent_constraints import (TangentConflict,project_controls,optimize_constrained,
                                  primitive_direction,on_ray)
 
@@ -16,9 +15,10 @@ def control_parts(start,end,controls,step=0.0,explicit=False):
     return [(joins[i],q,joins[i+1]) for i,q in enumerate(controls)]
 
 def center_parts(curves,parts,tolerance,center_limit,integer_step=0.0,tangents=None,cancel=None):
+    check_cancelled(cancel)
     if not center_limit or len(parts)!=1:return parts
     def check():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     check();start,q,end=parts[0];chord=end-start
     if abs(chord)<1e-12:return parts
     direction=chord/abs(chord);middle=(start+end)/2
@@ -63,10 +63,11 @@ def center_parts(curves,parts,tolerance,center_limit,integer_step=0.0,tangents=N
     return parts
 
 def adjust_parts(curves,parts,tolerance,center_limit=0.0,integer_step=0.0,explicit=False,context_factory=None,cancel=None,tangents=None):
+    check_cancelled(cancel)
     constrained=bool(tangents and any(tangents))
     if not integer_step and not constrained:return center_parts(curves,parts,tolerance,center_limit,cancel=cancel)
     def check():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     check();start,end=parts[0][0],parts[-1][-1];origin=start
     scale=max([abs(z-origin) for p in curves for z in p]+[abs(z-origin) for q in parts for z in q]+[1e-9])
     normal=tuple(tuple((z-origin)/scale for z in p) for p in curves);context=None;memo={}

@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """Production geometric fitting; masters share a minimal acceptable control count."""
 import math
-from concurrent.futures import CancelledError
 from quad_fit import single_l2,diagnostics
 from geometry_fit import make_context,optimize_one,geometric_bounds,nelder_mead
 from search_core import (Context,pack,unpack,pair_seeds,choose_diverse,sample_norms,
-                         score_norms,refine_lm,numeric_cache,unique_vectors)
+                         score_norms,refine_lm,numeric_cache,unique_vectors,check_cancelled)
 from chain_fit import optimize_chain,subdivision_seed
 from preferences import validated_settings
 from options_fit import adjust_parts,center_parts
@@ -33,6 +32,7 @@ def optimize_pair(p,geometry=None):
 
 def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=True,decision_only=False,center_limit=0.0,integer_step=0.0,explicit_midpoint=False,cancel=None,tangents=None,source_cache=None):
     """Fixed-count policies are internal; auto retains the established one/two fit."""
+    check_cancelled(cancel)
     if policy not in ('single','auto','pair','probe','multiple'):raise ValueError('Unknown policy')
     values=validated_settings(deviation=tolerance,max_controls=control_count)
     tolerance=values['deviation'];control_count=values['max_controls']
@@ -44,9 +44,11 @@ def fit(p,policy='auto',tolerance=.5,control_count=2,metrics=False,check_error=T
     cache=numeric_cache();source_cache={} if source_cache is None else source_cache;context=None;single_error=None
     while len(cache)>64:cache.pop(next(iter(cache)))
     def prepare(parts):
+        check_cancelled(cancel)
         return adjust_parts([p],parts,tolerance,center_limit,integer_step,explicit_midpoint,
                             context_factory=lambda curves:Context(curves[0]),cancel=cancel,tangents=tangents)
     def result(parts,error,status,norms=None):
+        check_cancelled(cancel)
         return dict(parts=parts,error=error,within=error[1]<=tolerance if error is not None else None,
                     angles=diagnostics(p,parts),single_error=single_error,status=status,
                     rms=score_norms(norms)*scale if norms is not None else None,tangents=tangents or (None,None))
@@ -104,7 +106,7 @@ def select_simpler(candidates,layers,margin,complete,measure,cancel=None,ceiling
     def worst(count,results,limit=None):
         upper=0.0
         for i in range(layers):
-            if cancel is not None and cancel():raise CancelledError()
+            check_cancelled(cancel)
             if i==len(results):results.append(complete(i,count))
             r=results[i]
             if r is None:return float('inf')
@@ -131,10 +133,11 @@ def fit_corresponding(curves,tolerance=.5,max_controls=2,cancel=None,center_limi
     source_caches=[{} for _ in curves]
     center_tolerance=tolerance if center_tolerance is None else center_tolerance
     comparison_tolerance=tolerance if comparison_tolerance is None else validated_settings(comparison_tolerance)['deviation']
-    options=dict(integer_step=integer_step,explicit_midpoint=explicit_midpoint,cancel=cancel) if integer_step else {}
+    options=dict(cancel=cancel)
+    if integer_step:options.update(integer_step=integer_step,explicit_midpoint=explicit_midpoint)
     if tangents is not None and len(tangents)!=len(curves):raise TangentConflict()
     def check_cancel():
-        if cancel is not None and cancel():raise CancelledError()
+        check_cancelled(cancel)
     def finish(results):
         if any(r is None for r in results):raise TangentConflict()
         if center_limit:

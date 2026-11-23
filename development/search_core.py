@@ -4,6 +4,7 @@
 No endpoint tangent constraints. Coordinates are normalized before search.
 """
 import math
+from concurrent.futures import CancelledError
 from segment_index import SegmentIndex
 from roots_unit import polynomial_roots_interval
 from quad_fit import (dot,cubic,quadratic,split,single_l2,pair_l2,pair_basis,
@@ -11,6 +12,11 @@ from quad_fit import (dot,cubic,quadratic,split,single_l2,pair_l2,pair_basis,
 from geometry_fit import (point_segment,nearest_quadratic,flatten,arc_samples,
                           geometric_bounds,nelder_mead,make_context,optimize_one,
                           sampled_objective)
+
+
+def check_cancelled(cancel):
+    """Honor the shared optional predicate at fitting and adjustment boundaries."""
+    if cancel is not None and cancel():raise CancelledError()
 
 
 def numeric_cache():
