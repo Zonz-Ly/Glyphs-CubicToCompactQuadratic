@@ -86,7 +86,7 @@ def geometric_bounds(p,parts,tolerance=1.0,accuracy=None,reject_above=None,sourc
     Max iterations/depth only leave a looser upper bound, never an assumed
     sampled guarantee. Includes a scale-related floating point allowance.
     """
-    accuracy=accuracy if accuracy is not None else max(.002,tolerance*.02)
+    accuracy=accuracy if accuracy is not None else min(max(.002,tolerance*.02),tolerance*.1)
     delta=accuracy/8.0
     bounds_points=tuple(p) if source_curves is None else tuple(z for q in source_curves for z in q)
     key=(tuple(p) if source_curves is None else tuple(map(tuple,source_curves)),delta)

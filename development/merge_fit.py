@@ -187,17 +187,38 @@ def fit_run_corresponding(chains,tolerance=.5,max_controls=2,cyclic=False,cancel
     whole=candidate(0,length)
     if whole is not None:return [dict(start=0,count=length,fits=whole)]
     def partition(rotation):
-        best=[None]*(length+1);best[length]=((0,0.0,0),[])
+        # First minimize block count and bottleneck error. Control count cannot
+        # break suffix ties yet: an earlier block can mask the suffix error.
+        best=[None]*(length+1);best[length]=(0,0.0)
         for offset in range(length-1,-1,-1):
-            choices=[]
+            choice=None
             for count in range(length-offset,0,-1):
                 fits=candidate(rotation+offset,count)
                 if fits is None:continue
-                tail,blocks=best[offset+count]
+                tail=best[offset+count]
                 error=max(r['error'][1] for r in fits) if count>1 else 0.0
-                cost=(tail[0]+1,max(error,tail[1]),tail[2]+len(fits[0]['parts']))
-                block=dict(start=(rotation+offset)%length,count=count,fits=fits)
-                choices.append((cost,[block]+blocks))
-            best[offset]=min(choices,key=lambda r:r[0])
-        return best[0]
-    return min((partition(i) for i in range(length if cyclic else 1)),key=lambda r:r[0])[1]
+                cost=(tail[0]+1,max(error,tail[1]))
+                if choice is None or cost<choice:choice=cost
+            best[offset]=choice
+        threshold=best[0][1]
+        # With the bottleneck fixed, additive block/control costs have optimal
+        # substructure. Store only successors and reconstruct the winner once.
+        costs=[None]*(length+1);costs[length]=(0,0)
+        successors=[None]*length
+        for offset in range(length-1,-1,-1):
+            for count in range(length-offset,0,-1):
+                fits=candidate(rotation+offset,count);tail=costs[offset+count]
+                if fits is None or tail is None:continue
+                error=max(r['error'][1] for r in fits) if count>1 else 0.0
+                if error>threshold:continue
+                cost=(tail[0]+1,tail[1]+len(fits[0]['parts']))
+                if costs[offset] is None or cost<costs[offset]:
+                    costs[offset]=cost;successors[offset]=count
+        return (costs[0][0],threshold,costs[0][1]),rotation,successors
+    _,rotation,successors=min((partition(i) for i in range(length if cyclic else 1)),key=lambda r:r[0])
+    blocks=[];offset=0
+    while offset<length:
+        count=successors[offset];start=(rotation+offset)%length
+        blocks.append(dict(start=start,count=count,fits=candidate(start,count)))
+        offset+=count
+    return blocks
