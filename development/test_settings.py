@@ -175,7 +175,10 @@ class VersionOneTests(unittest.TestCase):
     def test_metadata_author_version_and_entry_class(self):
         root,res=plugin_files()
         info=plistlib.loads((root/'CubicToCompactQuadratic.glyphsPlugin/Contents/Info.plist').read_bytes())
-        self.assertEqual(info['CFBundleShortVersionString'],'1.0')
+        from quad_fit import VERSION
+        self.assertEqual(info['CFBundleShortVersionString'],'1.1')
+        self.assertEqual(info['CFBundleShortVersionString'],VERSION)
+        self.assertEqual(info['CFBundleVersion'],'110')
         self.assertEqual(info['NSPrincipalClass'],'ZonzCubicToQuadraticPlugin')
         self.assertEqual(info['CFBundleIdentifier'],'com.Zonz.CubicToQuadratic')
         self.assertIn('Zonz',info['NSHumanReadableCopyright'])

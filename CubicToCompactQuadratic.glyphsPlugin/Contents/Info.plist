@@ -13,9 +13,9 @@
 	<key>CFBundleName</key>
 	<string>Compact Quadratic Curves</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1</string>
 	<key>CFBundleVersion</key>
-	<string>100</string>
+	<string>110</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2026 Zonz. Includes the Apache-2.0 GlyphsSDK loader.</string>
 	<key>NSPrincipalClass</key>

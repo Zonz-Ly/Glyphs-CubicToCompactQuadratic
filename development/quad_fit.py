@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Bezier primitives and algebraic seeds; geometric fitting is in fast_fit."""
 import math
-VERSION = '1.0'
+VERSION = '1.1'
 
 def dot(a, b):
     return (a.conjugate() * b).real
